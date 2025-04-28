@@ -1,0 +1,15 @@
+# Django #
+*.log
+*.pot
+*.pyc
+__pycache__
+
+# Backup files #
+*.bak
+agric/settings.py
+#static
+#migrations
+.idea
+/staticfiles
+mediafiles
+media
