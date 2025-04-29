@@ -138,7 +138,9 @@ class OperationDetail(models.Model):
     total_igv = models.DecimalField('Igv total', max_digits=15, decimal_places=6, default=0)
     # total_amount = total_value + total_igv
     total_amount = models.DecimalField('Importe total', max_digits=15, decimal_places=6, default=0)
-    remaining_quantity = models.DecimalField(max_digits=20, decimal_places=6, default=0)
+    remaining_quantity = models.DecimalField(max_digits=15, decimal_places=6, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name = 'Detalle operacion'
@@ -147,3 +149,25 @@ class OperationDetail(models.Model):
 
     def __str__(self):
         return str(self.id)
+
+
+class Person(models.Model):
+    PERSON_TYPE_CHOICES = [
+        ('1', 'DNI'),
+        ('6', 'RUC')
+    ]
+    person_type = models.CharField(max_length=2, choices=PERSON_TYPE_CHOICES, default='1')
+    person_number = models.CharField(max_length=15, unique=True)
+    full_name = models.CharField(max_length=300, blank=True, null=True)
+    is_customer = models.BooleanField(default=False)
+    is_supplier = models.BooleanField(default=False)
+    address = models.TextField(blank=True, null=True)
+    phone = models.CharField(max_length=20, blank=True, null=True)
+    email = models.EmailField(blank=True, null=True)
+
+    def __str__(self):
+        return self.full_name
+
+    class Meta:
+        verbose_name = 'Persona'
+        verbose_name_plural = 'Personas'
