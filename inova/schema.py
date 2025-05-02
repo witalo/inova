@@ -1,14 +1,15 @@
 import graphene
 import graphql_jwt
 
-from users.schema import UsrQuery, UsrMutation
+from products.schema import ProductsQuery, ProductsMutation
+from users.schema import UsersQuery, UsersMutation
 
 
-class Query(UsrQuery):
+class Query(UsersQuery, ProductsQuery):
     pass
 
 
-class Mutation(UsrMutation):
+class Mutation(UsersMutation, ProductsMutation):
     pass
 
 

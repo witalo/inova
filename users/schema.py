@@ -8,7 +8,7 @@ from users.mutations import *
 from users.types import *
 
 
-class UsrQuery(graphene.ObjectType):
+class UsersQuery(graphene.ObjectType):
     user_by_id = graphene.Field(UserType, pk=graphene.ID())
 
     @staticmethod
@@ -16,7 +16,7 @@ class UsrQuery(graphene.ObjectType):
         return User.objects.get(pk=pk)
 
 
-class UsrMutation(graphene.ObjectType):
+class UsersMutation(graphene.ObjectType):
     token_auth = graphql_jwt.ObtainJSONWebToken.Field()
     verify_token = graphql_jwt.Verify.Field()
     refresh_token = graphql_jwt.Refresh.Field()
