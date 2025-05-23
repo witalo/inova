@@ -93,7 +93,7 @@ class TypeAffectation(models.Model):
 
 class Product(models.Model):
     id = models.AutoField(primary_key=True)
-    code = models.CharField(max_length=20, null=True, blank=True)
+    code = models.CharField(max_length=50, null=True, blank=True)
     code_snt = models.CharField(max_length=20, null=True, blank=True)
     description = models.CharField(max_length=500, null=True, blank=True)
     price_without_igv = models.DecimalField(max_digits=15, decimal_places=6, default=0)
