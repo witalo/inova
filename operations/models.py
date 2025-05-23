@@ -86,7 +86,6 @@ class Operation(models.Model):
     total_free = models.DecimalField('TOTAL GRATUITA', max_digits=15, decimal_places=6, default=0)
     total_amount = models.DecimalField('TOTAL IMPORTE', max_digits=15, decimal_places=6, default=0)
 
-    send_sunat = models.BooleanField(default=False)
     send_person = models.BooleanField(default=False)
     sunat_description = models.CharField(verbose_name='DESCRIPCION SUNAT', max_length=300, null=True, blank=True)
     sunat_description_low = models.CharField(verbose_name='DESCRIPCION SUNAT BAJA', max_length=300, null=True,
@@ -157,7 +156,7 @@ class Person(models.Model):
         ('6', 'RUC')
     ]
     person_type = models.CharField(max_length=2, choices=PERSON_TYPE_CHOICES, default='1')
-    person_number = models.CharField(max_length=15, unique=True)
+    document = models.CharField(max_length=15, unique=True)
     full_name = models.CharField(max_length=300, blank=True, null=True)
     is_customer = models.BooleanField(default=False)
     is_supplier = models.BooleanField(default=False)

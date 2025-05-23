@@ -102,6 +102,7 @@ class Product(models.Model):
     type_affectation = models.ForeignKey('TypeAffectation', on_delete=models.SET_NULL, null=True, blank=True)
     unit = models.ForeignKey('Unit', on_delete=models.SET_NULL, null=True, blank=True)
     photo = models.ImageField('Foto', upload_to='products/', blank=True, null=True)
+    company = models.ForeignKey('users.Company', on_delete=models.SET_NULL, null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

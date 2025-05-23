@@ -9,6 +9,7 @@ class Cash(models.Model):
     account_number = models.CharField(max_length=50, null=True, blank=True)
     account_type = models.CharField(max_length=2, choices=ACCOUNT_TYPE_CHOICES, default='C')
     total = models.DecimalField(max_digits=15, decimal_places=6, default=0)
+    company = models.ForeignKey('users.Company', on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     is_enabled = models.BooleanField(default=True)
@@ -24,14 +25,7 @@ class Cash(models.Model):
 class Payment(models.Model):
     WAY_PAY_CHOICES = [
         (1, 'EFECTIVO [CONTADO]'),
-        (2, 'TARJETA DÉBITO [CONTADO]'),
-        (3, 'TARJETA CRÉDITO [CONTADO]'),
-        (4, 'TRANSFERENCIA [CONTADO]'),
-        (5, 'GIRO [CONTADO]'),
-        (6, 'CHEQUE [CONTADO]'),
-        (7, 'CUPÓN [CONTADO]'),
-        (8, 'YAPE [CONTADO]'),
-        (9, 'POR PAGAR [CRÉDITO]')
+        (2, 'POR PAGAR [CRÉDITO]')
     ]
     id = models.AutoField(primary_key=True)
     cash = models.ForeignKey('finances.Cash', on_delete=models.SET_NULL, null=True, blank=True)
@@ -42,7 +36,6 @@ class Payment(models.Model):
     bank_operation_code = models.CharField(max_length=45, null=True, blank=True)
     description = models.CharField(max_length=200, null=True, blank=True)
     total = models.DecimalField(max_digits=15, decimal_places=6, default=0)
-    remaining_total = models.DecimalField(max_digits=15, decimal_places=6, default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     is_validated = models.BooleanField(default=False)
