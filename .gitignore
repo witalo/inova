@@ -8,7 +8,7 @@ __pycache__
 *.bak
 inova/settings.py
 #static
-migrations
+#migrations
 .idea
 /staticfiles
 mediafiles
