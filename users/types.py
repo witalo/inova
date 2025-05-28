@@ -1,15 +1,47 @@
 import graphene
 from graphene_django import DjangoObjectType
 
-from users.models import User
+from users.models import User, Company
+
+
+class CompanyType(DjangoObjectType):
+    id = graphene.Int()
+
+    class Meta:
+        model = Company
+        fields = (
+            'id', 'ruc', 'denomination', 'address', 'phone',
+            'email', 'igv_percentage', 'pdf_size', 'pdf_color',
+            'created_at', 'updated_at'
+        )
+        # Excluir campos sensibles como password
 
 
 class UserType(DjangoObjectType):
     id = graphene.Int()
+    full_name = graphene.String()
 
     class Meta:
         model = User
-        fields = '__all__'
+        fields = (
+            'id', 'username', 'email', 'first_name', 'last_name',
+            'dni', 'phone', 'is_active', 'date_joined', 'company'
+        )
+        # Excluir password y otros campos sensibles
+
+    def resolve_full_name(self, info):
+        return f"{self.first_name} {self.last_name}"
+
+
+class AuthPayload(graphene.ObjectType):
+    """Payload para respuestas de autenticación"""
+    success = graphene.Boolean()
+    message = graphene.String()
+    errors = graphene.List(graphene.String)
+    token = graphene.String()
+    refresh_token = graphene.String()
+    user = graphene.Field(UserType)
+    company = graphene.Field(CompanyType)
 
 
 class ProductInput(graphene.InputObjectType):
