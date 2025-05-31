@@ -1,10 +1,8 @@
 import base64
 import graphene
 from django.contrib.auth import authenticate
-from django.core.exceptions import ValidationError
-from django.core.files.base import ContentFile
 from graphql_jwt.shortcuts import get_token
-import graphql_jwt
+from graphql_jwt.refresh_token.shortcuts import create_refresh_token, get_refresh_token
 from django.contrib.auth.hashers import check_password
 from users.models import User, Company
 from users.types import UserType, CompanyType
@@ -41,10 +39,11 @@ class CompanyLoginMutation(graphene.Mutation):
                 errors.append("Email inválido")
 
             # Validar contraseña
-            if not password or len(password) < 6:
+            if not password or len(password) < 4:
                 errors.append("Contraseña debe tener al menos 6 caracteres")
 
             if errors:
+                print(errors)
                 return CompanyLoginMutation(
                     success=False,
                     message="Datos inválidos",
@@ -124,7 +123,7 @@ class UserLoginMutation(graphene.Mutation):
             if not username or len(username) < 3:
                 errors.append("Usuario/email requerido")
 
-            if not password or len(password) < 6:
+            if not password or len(password) < 4:
                 errors.append("Contraseña debe tener al menos 6 caracteres")
 
             if errors:
@@ -193,7 +192,8 @@ class UserLoginMutation(graphene.Mutation):
 
             # Generar tokens JWT
             token = get_token(auth_user)
-            refresh_token = graphql_jwt.shortcuts.get_refresh_token(auth_user)
+            refresh_token = create_refresh_token(auth_user)
+            # refresh_token = get_refresh_token(auth_user)  # Ahora usando la función importada directamente
 
             return UserLoginMutation(
                 success=True,
@@ -206,6 +206,7 @@ class UserLoginMutation(graphene.Mutation):
             )
 
         except Exception as e:
+            print("Error:", e)
             return UserLoginMutation(
                 success=False,
                 message="Error interno del servidor",

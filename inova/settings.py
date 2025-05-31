@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'graphene_django',
     'corsheaders',
+    'graphql_jwt.refresh_token.apps.RefreshTokenConfig',
     'operations',
     'finances',
     'products',
@@ -79,7 +80,7 @@ WSGI_APPLICATION = 'inova.wsgi.application'
 
 # GraphQL Configuration
 GRAPHENE = {
-    "SCHEMA": "inova.schema.schema",
+    "SCHEMA": "inova.inova.schema",
     "MIDDLEWARE": [
         "graphql_jwt.middleware.JSONWebTokenMiddleware",
     ],
@@ -94,13 +95,17 @@ GRAPHQL_JWT = {
     'JWT_VERIFY_EXPIRATION': True,
     'JWT_EXPIRATION_DELTA': timedelta(hours=24),  # Token expira en 24 horas
     'JWT_REFRESH_EXPIRATION_DELTA': timedelta(days=7),  # Refresh token expira en 7 días
+    'JWT_LONG_RUNNING_REFRESH_TOKEN': True,
     'JWT_ALLOW_REFRESH': True,
     'JWT_AUTH_HEADER_PREFIX': 'Bearer',
+    'JWT_PAYLOAD_HANDLER': 'graphql_jwt.utils.jwt_payload',
     'JWT_ENCODE_HANDLER': 'graphql_jwt.utils.jwt_encode',
     'JWT_DECODE_HANDLER': 'graphql_jwt.utils.jwt_decode',
+    'JWT_PAYLOAD_GET_USERNAME_HANDLER': 'graphql_jwt.utils.get_username_from_payload',
+    'JWT_GET_USER_BY_NATURAL_KEY_HANDLER': 'graphql_jwt.utils.get_user_by_natural_key',
+    'JWT_REFRESH_TOKEN_N_BYTES': 20,
     'JWT_ALGORITHM': 'HS256',
     'JWT_SECRET_KEY': SECRET_KEY,
-    'JWT_GET_USER_BY_NATURAL_KEY_HANDLER': 'graphql_jwt.utils.get_user_by_natural_key',
 }
 # CORS Configuration
 CORS_ALLOW_ALL_ORIGINS = DEBUG
