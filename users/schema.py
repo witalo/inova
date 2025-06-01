@@ -62,3 +62,5 @@ class UsersMutation(graphene.ObjectType):
     user_login = UserLoginMutation.Field()
     create_user = CreateUserMutation.Field()
     update_user = UpdateUserMutation.Field()
+    create_company = CreateCompanyMutation.Field()
+    update_company = UpdateCompanyMutation.Field()
