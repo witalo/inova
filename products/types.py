@@ -11,7 +11,7 @@ from io import BytesIO
 from django.core.files.base import ContentFile
 from graphene_django import DjangoObjectType
 
-from products.models import Product, Unit
+from products.models import Product, Unit, TypeAffectation
 
 
 class ProductType(DjangoObjectType):
@@ -38,6 +38,12 @@ class ProductType(DjangoObjectType):
                 # Silenciosamente retornar None si hay error
                 return None
         return None
+
+
+class TypeAffectationType(DjangoObjectType):
+    class Meta:
+        model = TypeAffectation
+        fields = '__all__'
 
 
 class UnitType(DjangoObjectType):

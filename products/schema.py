@@ -1,9 +1,9 @@
 from datetime import datetime
 
 import graphene
-from products.models import Product
+from products.models import Product, TypeAffectation, Unit
 from products.mutations import ProductMutation, DeleteProductMutation
-from products.types import ProductType
+from products.types import ProductType, TypeAffectationType, UnitType
 from graphene_django import DjangoObjectType
 from django.db.models import Q, Value, IntegerField, Case, When, F
 from django.db.models.functions import Lower
@@ -13,17 +13,19 @@ from .models import Product
 
 
 class ProductsQuery(graphene.ObjectType):
-    products = graphene.List(ProductType)
+    products_by_company_id = graphene.List(ProductType, company_id=graphene.ID(required=True))
     search_products = graphene.List(
         ProductType,
         search=graphene.String(required=True),
         company_id=graphene.ID(required=True),
         limit=graphene.Int(default_value=20)
     )
+    type_affectations = graphene.List(TypeAffectationType)
+    units = graphene.List(UnitType)
 
     @staticmethod
-    def resolve_products(self, info):
-        return Product.objects.filter(is_active=True).order_by('id')
+    def resolve_products(self, info, company_id=None):
+        return Product.objects.filter(is_active=True, company_id=company_id).order_by('id')
 
     def resolve_search_products(self, info, search, company_id, limit=20):
         """
@@ -127,6 +129,7 @@ class ProductsQuery(graphene.ObjectType):
 
         return final_results
 
+    @staticmethod
     def _quick_similarity(self, search, text):
         """Cálculo rápido de similitud (0-1)"""
         if not text:
@@ -143,6 +146,14 @@ class ProductsQuery(graphene.ObjectType):
                 common += 1
 
         return common / len(search) if search else 0
+
+    @staticmethod
+    def resolve_type_affectations(self, info):
+        return TypeAffectation.objects.all().order_by('code')
+
+    @staticmethod
+    def resolve_units(self, info):
+        return Unit.objects.all().order_by('id')
 
 
 # VERSIÓN ALTERNATIVA SUPER OPTIMIZADA CON MYSQL FULLTEXT
@@ -205,4 +216,3 @@ class ProductsQuery(graphene.ObjectType):
 class ProductsMutation(graphene.ObjectType):
     save_product = ProductMutation.Field()
     delete_product = DeleteProductMutation.Field()
-
