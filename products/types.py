@@ -16,6 +16,10 @@ from products.models import Product, Unit, TypeAffectation
 
 class ProductType(DjangoObjectType):
     photo_base64 = graphene.String(description="Imagen del producto en base64")
+    unit_value = graphene.Float()
+    unit_price = graphene.Float()
+    purchase_price = graphene.Float()
+    stock = graphene.Float()
 
     class Meta:
         model = Product

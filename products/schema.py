@@ -24,7 +24,7 @@ class ProductsQuery(graphene.ObjectType):
     units = graphene.List(UnitType)
 
     @staticmethod
-    def resolve_products(self, info, company_id=None):
+    def resolve_products_by_company_id(self, info, company_id=None):
         return Product.objects.filter(is_active=True, company_id=company_id).order_by('id')
 
     def resolve_search_products(self, info, search, company_id, limit=20):
