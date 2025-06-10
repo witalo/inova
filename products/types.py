@@ -58,6 +58,63 @@ class UnitType(DjangoObjectType):
         fields = '__all__'
 
 
+import graphene
+from graphene_django import DjangoObjectType
+from django.db import transaction
+from django.core.exceptions import ValidationError
+import base64
+import imghdr
+import os
+from decimal import Decimal
+
+from .models import Product, TypeAffectation, Unit
+
+
+class ProductType(DjangoObjectType):
+    id = graphene.Int()
+    photo_base64 = graphene.String(description="Imagen del producto en base64")
+    unit_value = graphene.Float()
+    unit_price = graphene.Float()
+    purchase_price = graphene.Float()
+    stock = graphene.Float()
+
+    class Meta:
+        model = Product
+        fields = '__all__'
+
+    def resolve_photo_base64(self, info):
+        """Convierte la imagen almacenada a base64 para enviar al frontend"""
+        if self.photo and self.photo.name:
+            try:
+                with self.photo.open('rb') as image_file:
+                    image_data = image_file.read()
+                    # Detectar el tipo de imagen
+                    image_type = imghdr.what(None, h=image_data)
+                    if not image_type:
+                        image_type = 'jpeg'
+                    # Convertir a base64
+                    base64_string = base64.b64encode(image_data).decode('utf-8')
+                    return f"data:image/{image_type};base64,{base64_string}"
+            except Exception:
+                return None
+        return None
+
+
+class TypeAffectationType(DjangoObjectType):
+    code = graphene.Int()
+    class Meta:
+        model = TypeAffectation
+        fields = '__all__'
+
+
+class UnitType(DjangoObjectType):
+    id = graphene.Int()
+
+    class Meta:
+        model = Unit
+        fields = '__all__'
+
+
 class ProductInput(graphene.InputObjectType):
     id = graphene.ID(description="Solo necesario para actualización")
     code = graphene.String(required=True, description="Código interno del producto")
@@ -77,9 +134,9 @@ class ProductInput(graphene.InputObjectType):
     stock = graphene.Float(
         description="Stock disponible (opcional, default=0)"
     )
-    type_affectation_id = graphene.ID(
+    type_affectation_id = graphene.Int(  # Cambiado a Int porque es el tipo de 'code' en TypeAffectation
         required=True,
-        description="ID del tipo de afectación (IGV, etc.)"
+        description="Código del tipo de afectación (IGV, etc.)"
     )
     unit_id = graphene.ID(
         required=True,
@@ -98,6 +155,7 @@ class ProductInput(graphene.InputObjectType):
     is_active = graphene.Boolean(
         description="¿Producto activo? (default=True)"
     )
+
 
 
 def base64_to_image_file(base64_string, filename_prefix="product"):
