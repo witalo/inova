@@ -1,10 +1,15 @@
 import os
 import re
+from datetime import date
+from decimal import Decimal
 
 import graphene
+from django.db import transaction
 
-from operations.models import Person
-from operations.types import PersonInput, PersonType
+from operations.models import Person, Serial, Operation, OperationDetail
+from operations.types import PersonInput, PersonType, OperationDetailInput, OperationType
+from operations.views import generate_next_number
+from products.models import Product, TypeAffectation
 
 
 class PersonMutation(graphene.Mutation):
@@ -78,4 +83,210 @@ class PersonMutation(graphene.Mutation):
                 message=str(e),
                 person=person,
                 errors=errors if errors else {"general": str(e)}
+            )
+
+
+class CreateOperation(graphene.Mutation):
+    class Arguments:
+        document_id = graphene.ID(required=True)
+        serial_id = graphene.ID(required=True)
+        operation_type = graphene.String(required=True)
+        operation_date = graphene.String(required=True)
+        emit_date = graphene.String(required=True)
+        emit_time = graphene.String(required=True)
+        person_id = graphene.ID()
+        user_id = graphene.ID(required=True)
+        company_id = graphene.ID(required=True)
+        currency = graphene.String(default_value='PEN')
+        global_discount_percent = graphene.Float(default_value=0)
+        global_discount = graphene.Float(default_value=0)
+        total_discount = graphene.Float(default_value=0)
+        igv_percent = graphene.Float(default_value=18)
+        igv_amount = graphene.Float(required=True)
+        total_taxable = graphene.Float(default_value=0)
+        total_unaffected = graphene.Float(default_value=0)
+        total_exempt = graphene.Float(default_value=0)
+        total_free = graphene.Float(default_value=0)
+        total_amount = graphene.Float(required=True)
+        items = graphene.List(OperationDetailInput, required=True)
+
+    operation = graphene.Field(OperationType)
+    success = graphene.Boolean()
+    message = graphene.String()
+
+    @transaction.atomic
+    def mutate(self, info, **kwargs):
+        try:
+            # Obtener el siguiente número
+            serial = Serial.objects.get(id=kwargs['serial_id'])
+            next_number = generate_next_number(serial, kwargs['company_id'])
+
+            # Crear la operación
+            operation = Operation.objects.create(
+                document_id=kwargs['document_id'],
+                serial=serial.serial,
+                number=next_number,
+                operation_type=kwargs['operation_type'],
+                operation_status='1',  # Registrado
+                operation_date=kwargs['operation_date'],
+                emit_date=kwargs['emit_date'],
+                emit_time=kwargs['emit_time'],
+                person_id=kwargs.get('person_id'),
+                user_id=kwargs['user_id'],
+                company_id=kwargs['company_id'],
+                currency=kwargs['currency'],
+                global_discount_percent=kwargs['global_discount_percent'],
+                global_discount=kwargs['global_discount'],
+                total_discount=kwargs['total_discount'],
+                igv_percent=kwargs['igv_percent'],
+                igv_amount=kwargs['igv_amount'],
+                total_taxable=kwargs['total_taxable'],
+                total_unaffected=kwargs['total_unaffected'],
+                total_exempt=kwargs['total_exempt'],
+                total_free=kwargs['total_free'],
+                total_amount=kwargs['total_amount']
+            )
+
+            # Crear los detalles
+            for item in kwargs['items']:
+                product = Product.objects.get(id=item['product_id'])
+
+                # Calcular valores del detalle
+                quantity = Decimal(str(item['quantity']))
+                unit_value = Decimal(str(item['unit_value']))
+                unit_price = Decimal(str(item['unit_price']))
+                discount_percentage = Decimal(str(item['discount_percentage']))
+
+                total_value = quantity * unit_value
+                total_discount = total_value * (discount_percentage / 100)
+                total_value_after_discount = total_value - total_discount
+
+                # Calcular IGV según tipo de afectación
+                type_affectation = TypeAffectation.objects.get(id=item['type_affectation_id'])
+                if type_affectation.code == 10:  # Gravada
+                    total_igv = total_value_after_discount * (Decimal(str(kwargs['igv_percent'])) / 100)
+                else:
+                    total_igv = Decimal('0')
+
+                total_amount = total_value_after_discount + total_igv
+
+                OperationDetail.objects.create(
+                    operation=operation,
+                    product=product,
+                    description=product.description,
+                    type_affectation_id=item['type_affectation_id'],
+                    quantity=quantity,
+                    unit_value=unit_value,
+                    unit_price=unit_price,
+                    discount_percentage=discount_percentage,
+                    total_discount=total_discount,
+                    total_value=total_value_after_discount,
+                    total_igv=total_igv,
+                    total_amount=total_amount
+                )
+
+                # Actualizar stock si es salida
+                if kwargs['operation_type'] == 'S':
+                    product.stock -= quantity
+                    product.save()
+
+            return CreateOperation(
+                operation=operation,
+                success=True,
+                message='Operación creada exitosamente'
+            )
+
+        except Exception as e:
+            transaction.set_rollback(True)
+            return CreateOperation(
+                operation=None,
+                success=False,
+                message=str(e)
+            )
+
+
+class CancelOperation(graphene.Mutation):
+    class Arguments:
+        operation_id = graphene.ID(required=True)
+        reason = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    message = graphene.String()
+
+    @transaction.atomic
+    def mutate(self, info, operation_id, reason):
+        try:
+            operation = Operation.objects.get(id=operation_id)
+
+            # Validar que se pueda anular
+            if operation.operation_status not in ['1', '2']:
+                return CancelOperation(
+                    success=False,
+                    message='La operación no puede ser anulada en su estado actual'
+                )
+
+            # Cambiar estado
+            operation.operation_status = '3'  # Pendiente de baja
+            operation.sunat_description_low = reason
+            operation.low_date = date.today()
+            operation.save()
+
+            # Revertir stock si es salida
+            if operation.operation_type == 'S':
+                for detail in operation.operationdetail_set.all():
+                    if detail.product:
+                        detail.product.stock += detail.quantity
+                        detail.product.save()
+
+            return CancelOperation(
+                success=True,
+                message='Operación anulada exitosamente'
+            )
+
+        except Exception as e:
+            transaction.set_rollback(True)
+            return CancelOperation(
+                success=False,
+                message=str(e)
+            )
+
+
+class CreatePerson(graphene.Mutation):
+    class Arguments:
+        person_type = graphene.String(required=True)
+        document = graphene.String(required=True)
+        full_name = graphene.String(required=True)
+        is_customer = graphene.Boolean(default_value=True)
+        is_supplier = graphene.Boolean(default_value=False)
+        address = graphene.String()
+        phone = graphene.String()
+        email = graphene.String()
+
+    person = graphene.Field(PersonType)
+    success = graphene.Boolean()
+    message = graphene.String()
+
+    def mutate(self, info, **kwargs):
+        try:
+            # Validar documento único
+            if Person.objects.filter(document=kwargs['document']).exists():
+                return CreatePerson(
+                    person=None,
+                    success=False,
+                    message='Ya existe una persona con este documento'
+                )
+
+            person = Person.objects.create(**kwargs)
+
+            return CreatePerson(
+                person=person,
+                success=True,
+                message='Persona creada exitosamente'
+            )
+
+        except Exception as e:
+            return CreatePerson(
+                person=None,
+                success=False,
+                message=str(e)
             )

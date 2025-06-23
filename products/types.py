@@ -102,6 +102,7 @@ class ProductType(DjangoObjectType):
 
 class TypeAffectationType(DjangoObjectType):
     code = graphene.Int()
+
     class Meta:
         model = TypeAffectation
         fields = '__all__'
@@ -113,6 +114,13 @@ class UnitType(DjangoObjectType):
     class Meta:
         model = Unit
         fields = '__all__'
+
+
+class TopProductType(graphene.ObjectType):
+    product_id = graphene.ID()
+    product_name = graphene.String()
+    quantity = graphene.Float()
+    total_amount = graphene.Float()
 
 
 class ProductInput(graphene.InputObjectType):
@@ -155,7 +163,6 @@ class ProductInput(graphene.InputObjectType):
     is_active = graphene.Boolean(
         description="¿Producto activo? (default=True)"
     )
-
 
 
 def base64_to_image_file(base64_string, filename_prefix="product"):
