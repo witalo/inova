@@ -109,7 +109,7 @@ class Operation(models.Model):
         ordering = ['id']
         constraints = [
             models.UniqueConstraint(
-                fields=['company', 'operation_date', 'total_amount', 'person'],
+                fields=['company', 'operation_date', 'total_amount', 'person', 'emit_time'],
                 name='unique_operation'
             )
         ]

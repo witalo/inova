@@ -1,9 +1,11 @@
 from decimal import Decimal
 
-from django.shortcuts import render
-
 # Create your views here.
+from operations.apis import ApisNetPe
 from operations.models import Operation
+
+APIS_TOKEN = "Bearer apis-token-3244.1KWBKUSrgYq6HNht68arg8LNsId9vVLm"
+api_net = ApisNetPe(APIS_TOKEN)
 
 
 def generate_next_number(serial, company_id):
@@ -53,3 +55,4 @@ def calculate_operation_totals(details, igv_percent=18):
     )
 
     return totals
+

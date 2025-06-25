@@ -2,7 +2,7 @@ import os
 import re
 from datetime import date
 from decimal import Decimal
-
+from datetime import datetime
 import graphene
 from django.db import transaction
 
@@ -120,7 +120,10 @@ class CreateOperation(graphene.Mutation):
             # Obtener el siguiente número
             serial = Serial.objects.get(id=kwargs['serial_id'])
             next_number = generate_next_number(serial, kwargs['company_id'])
-
+            print('Venta:', kwargs)
+            operation_date = datetime.strptime(kwargs['operation_date'], '%Y-%m-%d').date()
+            emit_date = datetime.strptime(kwargs['emit_date'], '%Y-%m-%d').date()
+            emit_time = datetime.strptime(kwargs['emit_time'], '%H:%M:%S').time()
             # Crear la operación
             operation = Operation.objects.create(
                 document_id=kwargs['document_id'],
@@ -128,9 +131,9 @@ class CreateOperation(graphene.Mutation):
                 number=next_number,
                 operation_type=kwargs['operation_type'],
                 operation_status='1',  # Registrado
-                operation_date=kwargs['operation_date'],
-                emit_date=kwargs['emit_date'],
-                emit_time=kwargs['emit_time'],
+                operation_date=operation_date,
+                emit_date=emit_date,
+                emit_time=emit_time,
                 person_id=kwargs.get('person_id'),
                 user_id=kwargs['user_id'],
                 company_id=kwargs['company_id'],
@@ -162,7 +165,7 @@ class CreateOperation(graphene.Mutation):
                 total_value_after_discount = total_value - total_discount
 
                 # Calcular IGV según tipo de afectación
-                type_affectation = TypeAffectation.objects.get(id=item['type_affectation_id'])
+                type_affectation = TypeAffectation.objects.get(code=item['type_affectation_id'])
                 if type_affectation.code == 10:  # Gravada
                     total_igv = total_value_after_discount * (Decimal(str(kwargs['igv_percent'])) / 100)
                 else:
