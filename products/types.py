@@ -9,64 +9,10 @@ from PIL import Image
 from io import BytesIO
 
 from django.core.files.base import ContentFile
-from graphene_django import DjangoObjectType
-
-from products.models import Product, Unit, TypeAffectation
-
-
-class ProductType(DjangoObjectType):
-    photo_base64 = graphene.String(description="Imagen del producto en base64")
-    unit_value = graphene.Float()
-    unit_price = graphene.Float()
-    purchase_price = graphene.Float()
-    stock = graphene.Float()
-
-    class Meta:
-        model = Product
-        fields = '__all__'
-
-    def resolve_photo_base64(self, info):
-        """Convierte la imagen almacenada a base64 para enviar al frontend"""
-        if self.photo and self.photo.name:
-            try:
-                with self.photo.open('rb') as image_file:
-                    image_data = image_file.read()
-                    # Detectar el tipo de imagen
-                    image_type = imghdr.what(None, h=image_data)
-                    if not image_type:
-                        image_type = 'jpeg'
-                    # Convertir a base64
-                    base64_string = base64.b64encode(image_data).decode('utf-8')
-                    return f"data:image/{image_type};base64,{base64_string}"
-            except Exception as e:
-                # Silenciosamente retornar None si hay error
-                return None
-        return None
-
-
-class TypeAffectationType(DjangoObjectType):
-    class Meta:
-        model = TypeAffectation
-        fields = '__all__'
-
-
-class UnitType(DjangoObjectType):
-    id = graphene.Int()
-
-    class Meta:
-        model = Unit
-        fields = '__all__'
-
-
 import graphene
 from graphene_django import DjangoObjectType
-from django.db import transaction
-from django.core.exceptions import ValidationError
 import base64
 import imghdr
-import os
-from decimal import Decimal
-
 from .models import Product, TypeAffectation, Unit
 
 
@@ -117,7 +63,7 @@ class UnitType(DjangoObjectType):
 
 
 class TopProductType(graphene.ObjectType):
-    product_id = graphene.ID()
+    product_id = graphene.Int()
     product_name = graphene.String()
     quantity = graphene.Float()
     total_amount = graphene.Float()

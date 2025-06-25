@@ -7,18 +7,6 @@ from products.models import Product, Unit
 from products.types import TopProductType
 
 
-class PersonType(DjangoObjectType):
-    class Meta:
-        model = Person
-        fields = "__all__"
-        interfaces = (graphene.relay.Node,)
-
-    person_type_display = graphene.String(description="Nombre del tipo de documento")
-
-    def resolve_person_type_display(self, info):
-        return self.get_person_type_display()
-
-
 class PersonInput(graphene.InputObjectType):
     id = graphene.ID(description="ID solo para actualización")
     person_type = graphene.String(required=True, description="Tipo de documento: 1 (DNI) o 6 (RUC)")
@@ -44,13 +32,27 @@ class SerialType(DjangoObjectType):
 
 
 class PersonType(DjangoObjectType):
+    id = graphene.Int()
+
     class Meta:
         model = Person
         fields = '__all__'
 
 
 class OperationType(DjangoObjectType):
+    id = graphene.Int()
     details = graphene.List(lambda: OperationDetailType)
+    # Campos obligatorios con valores por defecto
+    total_discount = graphene.Float(required=True)
+    igv_percent = graphene.Float(required=True)
+    igv_amount = graphene.Float(required=True)
+    total_taxable = graphene.Float(required=True)
+    total_unaffected = graphene.Float(required=True)
+    total_exempt = graphene.Float(required=True)
+    total_free = graphene.Float(required=True)
+    total_amount = graphene.Float(required=True)
+    global_discount = graphene.Float(required=True)
+    global_discount_percent = graphene.Float(required=True)
 
     class Meta:
         model = Operation
@@ -59,14 +61,20 @@ class OperationType(DjangoObjectType):
     def resolve_details(self, info):
         return self.operationdetail_set.all()
 
-
-class OperationDetailType(DjangoObjectType):
-    class Meta:
-        model = OperationDetail
-        fields = '__all__'
+    def resolve_details(self, info):
+        return self.operationdetail_set.all()
 
 
 class OperationDetailType(DjangoObjectType):
+    id = graphene.Int()
+    quantity = graphene.Float()
+    unit_value = graphene.Float()
+    unit_price = graphene.Float()
+    total_discount = graphene.Float()
+    total_value = graphene.Float()
+    total_igv = graphene.Float()
+    total_amount = graphene.Float()
+
     class Meta:
         model = OperationDetail
         fields = '__all__'
