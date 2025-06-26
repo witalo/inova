@@ -117,19 +117,21 @@ class CreateOperation(graphene.Mutation):
     @transaction.atomic
     def mutate(self, info, **kwargs):
         try:
-            # Obtener el siguiente número
-            serial = Serial.objects.get(id=kwargs['serial_id'])
-            next_number = generate_next_number(serial, kwargs['company_id'])
-            print('Venta:', kwargs)
+
+            print('Operacion:', kwargs)
             operation_date = datetime.strptime(kwargs['operation_date'], '%Y-%m-%d').date()
             emit_date = datetime.strptime(kwargs['emit_date'], '%Y-%m-%d').date()
             emit_time = datetime.strptime(kwargs['emit_time'], '%H:%M:%S').time()
+            operation_type = kwargs['operation_type']
+            # Obtener el siguiente número
+            serial = Serial.objects.get(id=kwargs['serial_id'])
+            next_number = generate_next_number(serial, kwargs['company_id'], operation_type)
             # Crear la operación
             operation = Operation.objects.create(
                 document_id=kwargs['document_id'],
                 serial=serial.serial,
                 number=next_number,
-                operation_type=kwargs['operation_type'],
+                operation_type=operation_type,
                 operation_status='1',  # Registrado
                 operation_date=operation_date,
                 emit_date=emit_date,
@@ -188,9 +190,13 @@ class CreateOperation(graphene.Mutation):
                     total_amount=total_amount
                 )
 
-                # Actualizar stock si es salida
-                if kwargs['operation_type'] == 'S':
+                # Actualizar stock si es salida o entrada
+                if operation_type == 'S':
                     product.stock -= quantity
+                    product.save()
+                elif operation_type == 'E':
+                    product.stock += quantity
+                    product.purchase_price = unit_price
                     product.save()
 
             return CreateOperation(

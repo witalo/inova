@@ -22,11 +22,12 @@ class OperationsQuery(graphene.ObjectType):
         document_id=graphene.ID(required=True)
     )
 
-    # Operaciones
+    # Salidas y Entradas
     operations_by_date = graphene.List(
         OperationType,
         company_id=graphene.ID(required=True),
-        date=graphene.String(required=True)
+        date=graphene.String(required=True),
+        operation_type=graphene.String(required=True)
     )
     operation_by_id = graphene.Field(
         OperationType,
@@ -67,11 +68,12 @@ class OperationsQuery(graphene.ObjectType):
         return Serial.objects.filter(document_id=document_id).order_by('serial')
 
     @staticmethod
-    def resolve_operations_by_date(root, info, company_id, date):
+    def resolve_operations_by_date(root, info, company_id, date, operation_type):
         operation_date = datetime.strptime(date, '%Y-%m-%d').date()
         return Operation.objects.filter(
             company_id=company_id,
-            operation_date=operation_date
+            operation_date=operation_date,
+            operation_type=operation_type
         ).select_related(
             'document', 'person', 'user'
         ).order_by('-created_at')

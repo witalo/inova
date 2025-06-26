@@ -8,11 +8,12 @@ APIS_TOKEN = "Bearer apis-token-3244.1KWBKUSrgYq6HNht68arg8LNsId9vVLm"
 api_net = ApisNetPe(APIS_TOKEN)
 
 
-def generate_next_number(serial, company_id):
+def generate_next_number(serial, company_id, operation_type):
     """Genera el siguiente número correlativo para una serie"""
     last_operation = Operation.objects.filter(
         serial=serial.serial,
-        company_id=company_id
+        company_id=company_id,
+        operation_type=operation_type
     ).order_by('-number').first()
 
     if last_operation:
