@@ -88,10 +88,12 @@ class PersonMutation(graphene.Mutation):
 
 class CreateOperation(graphene.Mutation):
     class Arguments:
-        document_id = graphene.ID(required=True)
-        serial_id = graphene.ID(required=True)
+        document_id = graphene.ID()
+        serial_id = graphene.ID()
         operation_type = graphene.String(required=True)
         operation_date = graphene.String(required=True)
+        serial = graphene.String()
+        number = graphene.Int()
         emit_date = graphene.String(required=True)
         emit_time = graphene.String(required=True)
         person_id = graphene.ID()
@@ -123,13 +125,26 @@ class CreateOperation(graphene.Mutation):
             emit_date = datetime.strptime(kwargs['emit_date'], '%Y-%m-%d').date()
             emit_time = datetime.strptime(kwargs['emit_time'], '%H:%M:%S').time()
             operation_type = kwargs['operation_type']
-            # Obtener el siguiente número
-            serial = Serial.objects.get(id=kwargs['serial_id'])
-            next_number = generate_next_number(serial, kwargs['company_id'], operation_type)
+            company_id = kwargs['company_id']
+            document_id = kwargs['document_id']
+            serial = None
+            next_number = None
+            if operation_type == "E":
+                serial = kwargs['serial']
+                next_number = kwargs['number']
+                document_id = None
+                if serial == "" or next_number == 0:
+                    serial = "E001"
+                    next_number = generate_next_number(serial, company_id, operation_type)
+            elif operation_type == "S":
+                # Obtener el siguiente número
+                serial_document = Serial.objects.get(id=kwargs['serial_id'])
+                serial = serial_document.serial
+                next_number = generate_next_number(serial, company_id, operation_type)
             # Crear la operación
             operation = Operation.objects.create(
-                document_id=kwargs['document_id'],
-                serial=serial.serial,
+                document_id=document_id,
+                serial=serial,
                 number=next_number,
                 operation_type=operation_type,
                 operation_status='1',  # Registrado
@@ -138,7 +153,7 @@ class CreateOperation(graphene.Mutation):
                 emit_time=emit_time,
                 person_id=kwargs.get('person_id'),
                 user_id=kwargs['user_id'],
-                company_id=kwargs['company_id'],
+                company_id=company_id,
                 currency=kwargs['currency'],
                 global_discount_percent=kwargs['global_discount_percent'],
                 global_discount=kwargs['global_discount'],
