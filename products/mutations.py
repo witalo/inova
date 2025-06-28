@@ -26,15 +26,23 @@ class ProductMutation(graphene.Mutation):
         errors = {}
 
         try:
-            # === 1. Validaciones básicas (optimizadas) ===
-            code_stripped = input.code.strip() if input.code else ""
-            description_stripped = input.description.strip() if input.description else ""
+            # === 1. Validaciones básicas ===
+            code_stripped = input.code.strip().upper() if input.code else ""
+            description_stripped = input.description.strip().upper() if input.description else ""
 
             if not code_stripped:
                 errors["code"] = "El código es obligatorio"
+            elif len(code_stripped) < 3:
+                errors["code"] = "El código debe tener al menos 3 caracteres"
+            elif len(code_stripped) > 50:
+                errors["code"] = "El código no puede exceder 50 caracteres"
 
-            if len(description_stripped) < 3:
+            if not description_stripped:
+                errors["description"] = "La descripción es obligatoria"
+            elif len(description_stripped) < 3:
                 errors["description"] = "La descripción debe tener al menos 3 caracteres"
+            elif len(description_stripped) > 500:
+                errors["description"] = "La descripción no puede exceder 500 caracteres"
 
             # Validar valores numéricos
             if input.unit_value < 0:
@@ -42,6 +50,8 @@ class ProductMutation(graphene.Mutation):
 
             if input.unit_price < 0:
                 errors["unit_price"] = "El precio unitario no puede ser negativo"
+            elif input.unit_price <= input.unit_value:
+                errors["unit_price"] = "El precio de venta debe ser mayor que el valor unitario"
 
             if input.purchase_price is not None and input.purchase_price < 0:
                 errors["purchase_price"] = "El precio de compra no puede ser negativo"
@@ -49,24 +59,22 @@ class ProductMutation(graphene.Mutation):
             if input.stock is not None and input.stock < 0:
                 errors["stock"] = "El stock no puede ser negativo"
 
-            # === 2. Validar relaciones (con una sola consulta cuando sea posible) ===
-            type_affectation = None
-            unit = None
-            company = None
-
-            # CORRECCIÓN PRINCIPAL: TypeAffectation usa 'code' como PK, no 'id'
+            # === 2. Validar relaciones ===
             if not errors:
+                # Validar TypeAffectation
                 try:
                     type_affectation = TypeAffectation.objects.get(code=input.type_affectation_id)
                 except TypeAffectation.DoesNotExist:
                     errors[
                         "type_affectation_id"] = f"El tipo de afectación con código {input.type_affectation_id} no existe"
 
+                # Validar Unit
                 try:
                     unit = Unit.objects.get(id=input.unit_id)
                 except Unit.DoesNotExist:
                     errors["unit_id"] = "La unidad de medida no existe"
 
+                # Validar Company
                 try:
                     company = Company.objects.get(id=input.company_id)
                 except Company.DoesNotExist:
@@ -86,10 +94,13 @@ class ProductMutation(graphene.Mutation):
 
             if product_id and str(product_id).strip():
                 try:
-                    product = Product.objects.select_for_update().get(pk=product_id)
+                    product = Product.objects.select_for_update().get(
+                        pk=product_id,
+                        company_id=input.company_id  # Verificar que pertenezca a la empresa
+                    )
                     is_update = True
                 except Product.DoesNotExist:
-                    errors["id"] = "El producto no existe"
+                    errors["id"] = "El producto no existe o no pertenece a esta empresa"
                     return ProductMutation(
                         success=False,
                         message="Producto no encontrado",
@@ -99,9 +110,9 @@ class ProductMutation(graphene.Mutation):
             else:
                 product = Product()
 
-            # === 4. Validar código único por empresa (optimizado) ===
+            # === 4. Validar código único por empresa ===
             duplicate_query = Product.objects.filter(
-                code=code_stripped,
+                code__iexact=code_stripped,
                 company_id=input.company_id
             )
 
@@ -120,58 +131,74 @@ class ProductMutation(graphene.Mutation):
             # === 5. Actualizar campos del producto ===
             product.code = code_stripped
             product.description = description_stripped
-            product.unit_value = Decimal(str(input.unit_value))
-            product.unit_price = Decimal(str(input.unit_price))
+            product.unit_value = Decimal(str(round(input.unit_value, 4)))
+            product.unit_price = Decimal(str(round(input.unit_price, 4)))
             product.type_affectation = type_affectation
             product.unit = unit
             product.company = company
 
             # Campos opcionales
             if input.code_snt is not None:
-                product.code_snt = input.code_snt.strip() if input.code_snt else None
+                product.code_snt = input.code_snt.strip().upper() if input.code_snt else None
 
             if input.purchase_price is not None:
-                product.purchase_price = Decimal(str(input.purchase_price))
+                product.purchase_price = Decimal(str(round(input.purchase_price, 4)))
 
             if input.stock is not None:
-                product.stock = Decimal(str(input.stock))
+                product.stock = Decimal(str(round(input.stock, 4)))
 
             if input.is_active is not None:
                 product.is_active = input.is_active
 
-            # === 6. Manejo optimizado de imagen ===
-            if input.remove_photo and product.photo:
+            # === 6. Manejo de imagen ===
+            image_updated = False
+
+            if getattr(input, 'remove_photo', False) and product.photo:
                 # Eliminar foto actual
                 product.photo.delete(save=False)
+                image_updated = True
 
-            elif input.photo_base64 and input.photo_base64.strip():
-                try:
-                    # Eliminar foto anterior si existe
-                    if product.photo:
-                        product.photo.delete(save=False)
+            elif hasattr(input, 'photo_base64') and input.photo_base64:
+                # Limpiar el string base64
+                photo_base64_clean = input.photo_base64.strip()
 
-                    # Convertir base64 a archivo
-                    image_file, image_format = base64_to_image_file(
-                        input.photo_base64,
-                        filename_prefix=f"product_{code_stripped}"
-                    )
+                if photo_base64_clean and photo_base64_clean != "undefined" and photo_base64_clean != "null":
+                    try:
+                        # Convertir base64 a archivo
+                        image_file, is_new = base64_to_image_file(
+                            photo_base64_clean,
+                            existing_file=product.photo,
+                            filename_prefix=f"product_{code_stripped}"
+                        )
 
-                    # Guardar nueva imagen
-                    product.photo.save(image_file.name, image_file, save=False)
+                        # Si hay nueva imagen o cambió
+                        if image_file and is_new:
+                            # Eliminar foto anterior si existe
+                            if product.photo:
+                                product.photo.delete(save=False)
 
-                except Exception as e:
-                    errors["photo_base64"] = f"Error al procesar imagen: {str(e)}"
-                    return ProductMutation(
-                        success=False,
-                        message="Error al procesar imagen",
-                        product=None,
-                        errors=errors
-                    )
+                            # Guardar nueva imagen
+                            product.photo.save(image_file.name, image_file, save=False)
+                            image_updated = True
+
+                    except Exception as e:
+                        errors["photo_base64"] = f"Error al procesar imagen: {str(e)}"
+                        return ProductMutation(
+                            success=False,
+                            message="Error al procesar imagen",
+                            product=None,
+                            errors=errors
+                        )
 
             # === 7. Guardar producto ===
             try:
                 product.full_clean()
                 product.save()
+
+                # Log para debugging
+                if image_updated:
+                    print(f"Imagen {'actualizada' if is_update else 'agregada'} para producto {product.code}")
+
             except ValidationError as e:
                 # Convertir errores de validación del modelo
                 for field, messages in e.message_dict.items():
@@ -201,7 +228,7 @@ class ProductMutation(graphene.Mutation):
                 success=False,
                 message="Error interno del servidor",
                 product=None,
-                errors={"general": str(e)}
+                errors={"general": "Ocurrió un error inesperado. Por favor, intente nuevamente."}
             )
 
 
