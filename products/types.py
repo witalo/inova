@@ -162,3 +162,10 @@ def base64_to_image_file(base64_string, filename_prefix="product"):
 
     except Exception as e:
         raise ValueError(f"Error al procesar imagen: {str(e)}")
+
+
+class SaveProductResponse(graphene.ObjectType):
+    success = graphene.Boolean()
+    message = graphene.String()
+    product = graphene.Field(ProductType)
+    errors = graphene.JSONString()

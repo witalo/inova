@@ -6,7 +6,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from products.models import base64_to_image_file, Product, TypeAffectation, Unit
-from products.types import ProductType, ProductInput
+from products.types import ProductType, ProductInput, SaveProductResponse
 from users.models import Company
 
 
@@ -250,4 +250,143 @@ class DeleteProductMutation(graphene.Mutation):
                 success=False,
                 message=f"Error al eliminar producto: {str(e)}",
                 errors={"general": str(e)}
+            )
+
+
+class SaveProductMutation(graphene.Mutation):
+    class Arguments:
+        input = ProductInput(required=True)
+
+    Output = SaveProductResponse
+
+    @staticmethod
+    def mutate(root, info, input):
+        try:
+            # Validaciones
+            errors = {}
+
+            # Validar código
+            if not input.code or len(input.code.strip()) < 3:
+                errors['code'] = 'El código debe tener al menos 3 caracteres'
+            elif len(input.code) > 50:
+                errors['code'] = 'El código no puede exceder 50 caracteres'
+
+            # Validar descripción
+            if not input.description or len(input.description.strip()) < 3:
+                errors['description'] = 'La descripción debe tener al menos 3 caracteres'
+            elif len(input.description) > 500:
+                errors['description'] = 'La descripción no puede exceder 500 caracteres'
+
+            # Validar precios
+            if input.unit_value < 0:
+                errors['unit_value'] = 'El valor unitario no puede ser negativo'
+            if input.unit_price < 0:
+                errors['unit_price'] = 'El precio de venta no puede ser negativo'
+            if input.purchase_price is not None and input.purchase_price < 0:
+                errors['purchase_price'] = 'El precio de compra no puede ser negativo'
+            if input.stock is not None and input.stock < 0:
+                errors['stock'] = 'El stock no puede ser negativo'
+
+            # Verificar si existe otro producto con el mismo código en la empresa
+            existing_query = Product.objects.filter(
+                code__iexact=input.code.strip(),
+                company_id=input.company_id
+            )
+
+            if input.id:  # Si es actualización, excluir el producto actual
+                existing_query = existing_query.exclude(id=input.id)
+
+            if existing_query.exists():
+                errors['code'] = f'Ya existe un producto con el código {input.code}'
+
+            if errors:
+                return SaveProductResponse(
+                    success=False,
+                    message='Error en la validación de datos',
+                    errors=errors
+                )
+
+            # Crear o actualizar producto
+            if input.id:
+                # Actualizar producto existente
+                product = Product.objects.get(id=input.id, company_id=input.company_id)
+                product.code = input.code.strip().upper()
+                product.description = input.description.strip().upper()
+                product.unit_value = input.unit_value
+                product.unit_price = input.unit_price
+
+                if input.code_snt is not None:
+                    product.code_snt = input.code_snt.strip().upper() if input.code_snt else None
+
+                if input.purchase_price is not None:
+                    product.purchase_price = input.purchase_price
+
+                if input.stock is not None:
+                    product.stock = input.stock
+
+                if input.is_active is not None:
+                    product.is_active = input.is_active
+
+                message = 'Producto actualizado exitosamente'
+
+            else:
+                # Crear nuevo producto
+                product = Product(
+                    code=input.code.strip().upper(),
+                    code_snt=input.code_snt.strip().upper() if input.code_snt else None,
+                    description=input.description.strip().upper(),
+                    unit_value=input.unit_value,
+                    unit_price=input.unit_price,
+                    purchase_price=input.purchase_price or 0,
+                    stock=input.stock or 0,
+                    company_id=input.company_id,
+                    is_active=True
+                )
+                message = 'Producto creado exitosamente'
+
+            # Asignar relaciones
+            product.type_affectation_id = input.type_affectation_id
+            product.unit_id = input.unit_id
+
+            # Manejar imagen
+            if input.remove_photo and product.photo:
+                product.photo.delete()
+                product.photo = None
+            elif input.photo_base64:
+                try:
+                    content_file, is_new = base64_to_image_file(
+                        input.photo_base64,
+                        product.photo
+                    )
+                    if is_new and content_file:
+                        if product.photo:
+                            product.photo.delete()
+                        product.photo = content_file
+                except ValueError as e:
+                    errors['photo'] = str(e)
+                    return SaveProductResponse(
+                        success=False,
+                        message='Error al procesar la imagen',
+                        errors=errors
+                    )
+
+            product.save()
+
+            return SaveProductResponse(
+                success=True,
+                message=message,
+                product=product
+            )
+
+        except Product.DoesNotExist:
+            return SaveProductResponse(
+                success=False,
+                message='Producto no encontrado',
+                errors={'general': 'El producto no existe o no tienes permisos para editarlo'}
+            )
+        except Exception as e:
+            return SaveProductResponse(
+                success=False,
+                message=f'Error al guardar el producto: {str(e)}',
+                errors={'general': str(e)}
             )

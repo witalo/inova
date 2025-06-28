@@ -20,6 +20,12 @@ class ProductsQuery(graphene.ObjectType):
         company_id=graphene.ID(required=True),
         limit=graphene.Int(default_value=20)
     )
+    # Obtener producto por ID
+    product_by_id = graphene.Field(
+        ProductType,
+        id=graphene.ID(required=True),
+        company_id=graphene.ID(required=True)
+    )
     type_affectations = graphene.List(TypeAffectationType)
     units = graphene.List(UnitType)
 
@@ -146,6 +152,19 @@ class ProductsQuery(graphene.ObjectType):
                 common += 1
 
         return common / len(search) if search else 0
+
+    @staticmethod
+    def resolve_product_by_id(self, info, id, company_id):
+        try:
+            return Product.objects.select_related(
+                'type_affectation',
+                'unit'
+            ).get(
+                id=id,
+                company_id=company_id
+            )
+        except Product.DoesNotExist:
+            return None
 
     @staticmethod
     def resolve_type_affectations(self, info):
