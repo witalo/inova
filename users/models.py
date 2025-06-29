@@ -41,7 +41,12 @@ class Company(models.Model):
         return check_password(raw_password, self.password)
 
     def save(self, *args, **kwargs):
-        # Si hay un logo anterior y se está cambiando, eliminar el anterior
+        # Encriptar la contraseña si es nueva o se está modificando
+        if not self.pk or 'password' in kwargs.get('update_fields', []):
+            if self.password and not self.password.startswith('pbkdf2_sha256$'):
+                self.password = make_password(self.password)
+
+        # Manejo del logo
         try:
             old_company = Company.objects.get(pk=self.pk)
             if old_company.logo and old_company.logo != self.logo:
@@ -49,7 +54,8 @@ class Company(models.Model):
                     os.remove(old_company.logo.path)
         except Company.DoesNotExist:
             pass
-        super(Company, self).save(*args, **kwargs)
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.denomination or f"Empresa {self.ruc}"
