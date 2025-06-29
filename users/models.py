@@ -66,35 +66,47 @@ class User(AbstractUser):
     photo = models.ImageField('Foto', upload_to='users/', blank=True, null=True)
     company = models.ForeignKey(
         'Company',
-        on_delete=models.CASCADE,  # Cambié a CASCADE para mejor integridad
+        on_delete=models.CASCADE,
         null=True,
         blank=True,
         related_name='users'
     )
+
     REQUIRED_FIELDS = ['email', 'first_name', 'last_name']
 
     def save(self, *args, **kwargs):
-        try:
-            # Obtén el usuario actual antes de guardarlo
-            old_user = User.objects.get(pk=self.pk)
-            if old_user.photo and old_user.photo != self.photo:
-                # Si existe una foto anterior y es diferente a la nueva, elimínala
-                if os.path.isfile(old_user.photo.path):
-                    os.remove(old_user.photo.path)
-        except User.DoesNotExist:
-            # Si el usuario no existe, no hagas nada
-            pass
+        # Manejar eliminación de foto anterior si cambió
+        if self.pk:
+            try:
+                old_user = User.objects.get(pk=self.pk)
+                if old_user.photo and old_user.photo != self.photo:
+                    # Si existe una foto anterior y es diferente, elimínala
+                    if os.path.isfile(old_user.photo.path):
+                        os.remove(old_user.photo.path)
+            except User.DoesNotExist:
+                pass
+
         super(User, self).save(*args, **kwargs)
 
     @property
     def full_name(self):
+        """Retorna el nombre completo del usuario"""
         return f"{self.first_name} {self.last_name}".strip()
+
+    @property
+    def initials(self):
+        """Retorna las iniciales del usuario"""
+        first_initial = self.first_name[0] if self.first_name else ""
+        last_initial = self.last_name[0] if self.last_name else ""
+        return f"{first_initial}{last_initial}".upper()
+
+    def __str__(self):
+        return self.email or self.username
 
     class Meta:
         verbose_name = 'Usuario'
         verbose_name_plural = 'Usuarios'
         ordering = ['first_name', 'last_name']
-        # Índice compuesto para mejorar rendimiento
         indexes = [
             models.Index(fields=['company', 'is_active']),
             models.Index(fields=['email']),

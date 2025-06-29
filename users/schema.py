@@ -13,7 +13,7 @@ class UsersQuery(graphene.ObjectType):
     user_by_id = graphene.Field(UserType, pk=graphene.ID())
     users_by_company = graphene.List(UserType, company_id=graphene.ID())
     me = graphene.Field(UserType)
-
+    current_user = graphene.Field(UserType)
     # Queries para empresas
     company_by_id = graphene.Field(CompanyType, pk=graphene.ID())
     company_by_ruc = graphene.Field(CompanyType, ruc=graphene.String())
@@ -31,6 +31,13 @@ class UsersQuery(graphene.ObjectType):
 
     @staticmethod
     def resolve_me(root, info):
+        user = info.context.user
+        if user.is_authenticated:
+            return user
+        return None
+
+    def resolve_current_user(self, info):
+        """Obtiene el usuario autenticado actual"""
         user = info.context.user
         if user.is_authenticated:
             return user
@@ -64,3 +71,5 @@ class UsersMutation(graphene.ObjectType):
     update_user = UpdateUserMutation.Field()
     create_company = CreateCompanyMutation.Field()
     update_company = UpdateCompanyMutation.Field()
+    update_profile = UpdateProfileMutation.Field()
+    change_password = ChangePasswordMutation.Field()
