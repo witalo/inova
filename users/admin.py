@@ -7,27 +7,18 @@ from django.utils.translation import gettext_lazy as _
 from django import forms
 
 
-class CompanyAdminForm(forms.ModelForm):
-    password = forms.CharField(
-        label="Contraseña",
-        widget=forms.PasswordInput(render_value=True),
-        required=False,
-        help_text="Dejar en blanco para mantener la contraseña actual"
-    )
-
-    class Meta:
-        model = Company
-        fields = '__all__'
 
 
 class CompanyAdmin(admin.ModelAdmin):
-    form = CompanyAdminForm
     list_display = ('denomination', 'ruc', 'email', 'is_active')
 
     def save_model(self, request, obj, form, change):
-        password = form.cleaned_data.get('password')
-        if password:  # Solo actualizar si se proporcionó una nueva contraseña
-            obj.set_password(password)
+        # Si el campo password está siendo modificado o es un nuevo registro
+        if 'password' in form.changed_data or not change:
+            if obj.password:  # Si hay una contraseña proporcionada
+                # Encripta la contraseña solo si no está ya encriptada
+                if not obj.password.startswith('pbkdf2_sha256$'):
+                    obj.password = make_password(obj.password)
         super().save_model(request, obj, form, change)
 
 
