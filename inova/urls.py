@@ -25,4 +25,7 @@ from inova import settings
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("graphql", csrf_exempt(GraphQLView.as_view(graphiql=True, schema=schema))),
-] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+]
+# ✅ Agregar soporte para archivos estáticos y multimedia
+urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
