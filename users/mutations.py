@@ -738,20 +738,27 @@ class UpdateProfileMutation(graphene.Mutation):
 
     Output = UpdateProfileResponse
 
-    @transaction.atomic
+    @staticmethod
     def mutate(self, info, input):
-        user = info.context.user
-
-        if not user.is_authenticated:
+        # user = info.context.user
+        #
+        # if not user.is_authenticated:
+        #     return UpdateProfileResponse(
+        #         success=False,
+        #         message="Usuario no autenticado",
+        #         errors={"auth": "Debes iniciar sesión para actualizar tu perfil"}
+        #     )
+        print("Usuario:", input)
+        if not input.id or input.id == 0:
             return UpdateProfileResponse(
                 success=False,
-                message="Usuario no autenticado",
-                errors={"auth": "Debes iniciar sesión para actualizar tu perfil"}
+                message="Usuario no encontrado",
+                errors={"auth": "Imposible de identificar el usuario"}
             )
-
         errors = {}
 
         try:
+            user = User.objects.get(id=input.id)
             # Validar nombre
             if not input.first_name or len(input.first_name.strip()) < 2:
                 errors["first_name"] = "El nombre debe tener al menos 2 caracteres"
