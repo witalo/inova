@@ -100,6 +100,7 @@ class UserType(DjangoObjectType):
 
 
 class ProfileInput(graphene.InputObjectType):
+    id = graphene.Int(required=True)
     first_name = graphene.String(required=True)
     last_name = graphene.String(required=True)
     dni = graphene.String()
