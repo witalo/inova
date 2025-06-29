@@ -60,47 +60,31 @@ class CompanyType(DjangoObjectType):
 
 class UserType(DjangoObjectType):
     id = graphene.Int()
-    full_name = graphene.String()
     photo_base64 = graphene.String(description="Foto del usuario en base64")
+    full_name = graphene.String()
 
     class Meta:
         model = User
-        fields = (
+        fields = [
             'id', 'username', 'email', 'first_name', 'last_name',
-            'dni', 'phone', 'is_active', 'date_joined', 'company', 'photo'
-        )
-        # Excluir password y otros campos sensibles
-
-    def resolve_full_name(self, info):
-        return f"{self.first_name} {self.last_name}"
+            'dni', 'phone', 'is_active', 'is_staff', 'is_superuser',
+            'date_joined', 'last_login', 'company'
+        ]
 
     def resolve_photo_base64(self, info):
         """Convierte la imagen almacenada a base64 para enviar al frontend"""
         if self.photo and self.photo.name:
             try:
-                # Abrir y leer la imagen
                 self.photo.open('rb')
                 image_data = self.photo.read()
                 self.photo.close()
 
-                # Detectar el tipo de imagen usando múltiples métodos
-                image_type = None
-
-                # Método 1: Por extensión del archivo
+                # Detectar tipo de imagen
+                image_type = 'jpeg'
                 if '.' in self.photo.name:
                     ext = self.photo.name.split('.')[-1].lower()
-                    if ext in ['jpg', 'jpeg', 'png', 'webp', 'gif']:
+                    if ext in ['png', 'jpg', 'jpeg', 'webp']:
                         image_type = 'jpeg' if ext == 'jpg' else ext
-
-                # Método 2: Por contenido usando imghdr
-                if not image_type:
-                    detected_type = imghdr.what(None, h=image_data)
-                    if detected_type:
-                        image_type = detected_type
-
-                # Fallback
-                if not image_type:
-                    image_type = 'jpeg'
 
                 # Convertir a base64
                 base64_string = base64.b64encode(image_data).decode('utf-8')
@@ -110,6 +94,25 @@ class UserType(DjangoObjectType):
                 print(f"Error al convertir imagen a base64: {e}")
                 return None
         return None
+
+    def resolve_full_name(self, info):
+        return self.full_name
+
+
+class ProfileInput(graphene.InputObjectType):
+    first_name = graphene.String(required=True)
+    last_name = graphene.String(required=True)
+    dni = graphene.String()
+    phone = graphene.String()
+    photo_base64 = graphene.String()
+    remove_photo = graphene.Boolean()
+
+
+class UpdateProfileResponse(graphene.ObjectType):
+    success = graphene.Boolean()
+    message = graphene.String()
+    user = graphene.Field(UserType)
+    errors = graphene.JSONString()
 
 
 class AuthPayload(graphene.ObjectType):
@@ -121,3 +124,15 @@ class AuthPayload(graphene.ObjectType):
     refresh_token = graphene.String()
     user = graphene.Field(UserType)
     company = graphene.Field(CompanyType)
+
+
+class ChangePasswordInput(graphene.InputObjectType):
+    current_password = graphene.String(required=True)
+    new_password = graphene.String(required=True)
+    confirm_password = graphene.String(required=True)
+
+
+class ChangePasswordResponse(graphene.ObjectType):
+    success = graphene.Boolean()
+    message = graphene.String()
+    errors = graphene.JSONString()

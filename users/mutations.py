@@ -7,11 +7,15 @@ from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.validators import validate_email
+from django.db import transaction
 from graphql_jwt.shortcuts import get_token
 from graphql_jwt.refresh_token.shortcuts import create_refresh_token, get_refresh_token
 from django.contrib.auth.hashers import check_password
+
+from products.models import base64_to_image_file
 from users.models import User, Company
-from users.types import UserType, CompanyType
+from users.types import UserType, CompanyType, UpdateProfileResponse, ProfileInput, ChangePasswordResponse, \
+    ChangePasswordInput
 
 
 class CompanyLoginMutation(graphene.Mutation):
@@ -361,6 +365,7 @@ class UpdateUserMutation(graphene.Mutation):
                 message="Error al actualizar usuario",
                 errors=[str(e)]
             )
+
 
 class CreateCompanyMutation(graphene.Mutation):
     """
@@ -721,4 +726,214 @@ class UpdateCompanyMutation(graphene.Mutation):
                 success=False,
                 message="Error interno del servidor",
                 errors=[str(e)]
+            )
+
+
+# Mutation para actualizar perfil
+class UpdateProfileMutation(graphene.Mutation):
+    """Mutación para actualizar el perfil del usuario autenticado"""
+
+    class Arguments:
+        input = ProfileInput(required=True)
+
+    Output = UpdateProfileResponse
+
+    @transaction.atomic
+    def mutate(self, info, input):
+        user = info.context.user
+
+        if not user.is_authenticated:
+            return UpdateProfileResponse(
+                success=False,
+                message="Usuario no autenticado",
+                errors={"auth": "Debes iniciar sesión para actualizar tu perfil"}
+            )
+
+        errors = {}
+
+        try:
+            # Validar nombre
+            if not input.first_name or len(input.first_name.strip()) < 2:
+                errors["first_name"] = "El nombre debe tener al menos 2 caracteres"
+            elif len(input.first_name) > 50:
+                errors["first_name"] = "El nombre no puede exceder 50 caracteres"
+            elif not re.match(r'^[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+$', input.first_name):
+                errors["first_name"] = "El nombre solo puede contener letras"
+
+            # Validar apellido
+            if not input.last_name or len(input.last_name.strip()) < 2:
+                errors["last_name"] = "El apellido debe tener al menos 2 caracteres"
+            elif len(input.last_name) > 50:
+                errors["last_name"] = "El apellido no puede exceder 50 caracteres"
+            elif not re.match(r'^[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+$', input.last_name):
+                errors["last_name"] = "El apellido solo puede contener letras"
+
+            # Validar DNI (opcional)
+            if input.dni is not None and input.dni.strip():
+                dni_clean = input.dni.strip()
+                if len(dni_clean) != 8:
+                    errors["dni"] = "El DNI debe tener 8 dígitos"
+                elif not dni_clean.isdigit():
+                    errors["dni"] = "El DNI solo puede contener números"
+                else:
+                    # Verificar que no exista otro usuario con el mismo DNI
+                    existing_dni = User.objects.filter(
+                        dni=dni_clean
+                    ).exclude(pk=user.pk).exists()
+
+                    if existing_dni:
+                        errors["dni"] = "Este DNI ya está registrado"
+
+            # Validar teléfono (opcional)
+            if input.phone is not None and input.phone.strip():
+                phone_clean = input.phone.strip()
+                if len(phone_clean) != 9:
+                    errors["phone"] = "El teléfono debe tener 9 dígitos"
+                elif not phone_clean.isdigit():
+                    errors["phone"] = "El teléfono solo puede contener números"
+                elif not phone_clean.startswith('9'):
+                    errors["phone"] = "El teléfono debe empezar con 9"
+
+            if errors:
+                return UpdateProfileResponse(
+                    success=False,
+                    message="Error en la validación de datos",
+                    errors=errors
+                )
+
+            # Actualizar datos básicos
+            user.first_name = input.first_name.strip()
+            user.last_name = input.last_name.strip()
+
+            # Actualizar campos opcionales
+            if input.dni is not None:
+                user.dni = input.dni.strip() if input.dni.strip() else None
+
+            if input.phone is not None:
+                user.phone = input.phone.strip() if input.phone.strip() else None
+
+            # Manejar foto
+            if getattr(input, 'remove_photo', False) and user.photo:
+                # Eliminar foto actual
+                user.photo.delete(save=False)
+
+            elif hasattr(input, 'photo_base64') and input.photo_base64:
+                # Actualizar foto
+                photo_base64_clean = input.photo_base64.strip()
+
+                if photo_base64_clean and photo_base64_clean != "undefined" and photo_base64_clean != "null":
+                    try:
+                        # Convertir base64 a archivo
+                        image_file, is_new = base64_to_image_file(
+                            photo_base64_clean,
+                            existing_file=user.photo,
+                            filename_prefix=f"user_{user.username}"
+                        )
+
+                        # Si hay nueva imagen o cambió
+                        if image_file and is_new:
+                            # Eliminar foto anterior si existe
+                            if user.photo:
+                                user.photo.delete(save=False)
+
+                            # Guardar nueva imagen
+                            user.photo.save(image_file.name, image_file, save=False)
+
+                    except Exception as e:
+                        errors["photo_base64"] = f"Error al procesar imagen: {str(e)}"
+                        return UpdateProfileResponse(
+                            success=False,
+                            message="Error al procesar la imagen",
+                            errors=errors
+                        )
+
+            # Guardar usuario
+            user.save()
+
+            return UpdateProfileResponse(
+                success=True,
+                message="Perfil actualizado exitosamente",
+                user=user
+            )
+
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error en UpdateProfileMutation: {str(e)}", exc_info=True)
+
+            return UpdateProfileResponse(
+                success=False,
+                message="Error interno al actualizar el perfil",
+                errors={"general": "Ocurrió un error inesperado. Por favor, intente nuevamente."}
+            )
+
+
+class ChangePasswordMutation(graphene.Mutation):
+    """Mutación para cambiar la contraseña del usuario"""
+
+    class Arguments:
+        input = ChangePasswordInput(required=True)
+
+    Output = ChangePasswordResponse
+
+    def mutate(self, info, input):
+        user = info.context.user
+
+        if not user.is_authenticated:
+            return ChangePasswordResponse(
+                success=False,
+                message="Usuario no autenticado",
+                errors={"auth": "Debes iniciar sesión para cambiar tu contraseña"}
+            )
+
+        errors = {}
+
+        # Validar contraseña actual
+        if not user.check_password(input.current_password):
+            errors["current_password"] = "La contraseña actual es incorrecta"
+
+        # Validar nueva contraseña
+        if len(input.new_password) < 8:
+            errors["new_password"] = "La contraseña debe tener al menos 8 caracteres"
+        elif not re.search(r'[A-Z]', input.new_password):
+            errors["new_password"] = "La contraseña debe contener al menos una mayúscula"
+        elif not re.search(r'[a-z]', input.new_password):
+            errors["new_password"] = "La contraseña debe contener al menos una minúscula"
+        elif not re.search(r'[0-9]', input.new_password):
+            errors["new_password"] = "La contraseña debe contener al menos un número"
+
+        # Validar confirmación
+        if input.new_password != input.confirm_password:
+            errors["confirm_password"] = "Las contraseñas no coinciden"
+
+        # Validar que no sea igual a la actual
+        if input.current_password == input.new_password:
+            errors["new_password"] = "La nueva contraseña debe ser diferente a la actual"
+
+        if errors:
+            return ChangePasswordResponse(
+                success=False,
+                message="Error en la validación",
+                errors=errors
+            )
+
+        try:
+            # Cambiar contraseña
+            user.set_password(input.new_password)
+            user.save()
+
+            # Actualizar sesión para evitar logout
+            from django.contrib.auth import update_session_auth_hash
+            update_session_auth_hash(info.context, user)
+
+            return ChangePasswordResponse(
+                success=True,
+                message="Contraseña actualizada exitosamente"
+            )
+
+        except Exception as e:
+            return ChangePasswordResponse(
+                success=False,
+                message="Error al cambiar la contraseña",
+                errors={"general": str(e)}
             )
