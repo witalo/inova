@@ -7,8 +7,6 @@ from django.utils.translation import gettext_lazy as _
 from django import forms
 
 
-
-
 class CompanyAdmin(admin.ModelAdmin):
     list_display = ('denomination', 'ruc', 'email', 'is_active')
 
