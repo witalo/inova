@@ -98,3 +98,22 @@ class OperationDetailInput(graphene.InputObjectType):
     unit_price = graphene.Float(required=True)
     discount_percentage = graphene.Float(default_value=0)
     type_affectation_id = graphene.ID(required=True)
+
+
+# Types para el reporte
+class DailyOperationType(graphene.ObjectType):
+    day = graphene.Int()
+    date = graphene.String()
+    total_sales = graphene.Float()
+    total_purchases = graphene.Float()
+    sales_count = graphene.Int()
+    purchases_count = graphene.Int()
+
+
+class MonthlyReportType(graphene.ObjectType):
+    daily_operations = graphene.List(DailyOperationType)
+    top_products = graphene.List(TopProductType)
+    total_transactions = graphene.Int()
+    total_sales = graphene.Float()
+    total_purchases = graphene.Float()
+    total_profit = graphene.Float()

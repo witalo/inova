@@ -2,13 +2,16 @@ import graphene
 from django.db import transaction
 from django.db.models import Q, Count, Sum
 import logging
+
+from django.db.models.functions import Extract
+
 from operations import models
 from operations.apis import ApisNetPe
 from operations.models import Person
 from operations.mutations import PersonMutation, CreateOperation, CancelOperation, CreatePerson
 from operations.types import *
 from django.conf import settings
-from datetime import datetime
+from datetime import datetime, date
 import requests
 # Configurar logger
 logger = logging.getLogger(__name__)
@@ -57,6 +60,19 @@ class OperationsQuery(graphene.ObjectType):
     search_person = graphene.List(
         PersonType,
         document=graphene.String(required=True)
+    )
+
+    monthly_report = graphene.Field(
+        MonthlyReportType,
+        company_id=graphene.ID(required=True),
+        start_date=graphene.String(required=True),
+        end_date=graphene.String(required=True)
+    )
+    monthly_summary = graphene.Field(
+        MonthlyReportType,
+        company_id=graphene.ID(required=True),
+        year=graphene.Int(required=True),
+        month=graphene.Int(required=True)
     )
 
     @staticmethod
@@ -354,6 +370,166 @@ class OperationsQuery(graphene.ObjectType):
             operation_status__in=['3', '4']  # Pendiente de baja o En proceso de baja
         ).select_related('document', 'person').annotate(
             days_since_pending=timezone.now() - models.F('low_date')
+        )
+
+    @staticmethod
+    def resolve_monthly_report(self, info, company_id, start_date, end_date):
+        # Convertir strings a fechas
+        start = datetime.strptime(start_date, '%Y-%m-%d').date()
+        end = datetime.strptime(end_date, '%Y-%m-%d').date()
+
+        # Filtro base para operaciones válidas
+        base_filter = Q(
+            company_id=company_id,
+            operation_date__gte=start,
+            operation_date__lte=end
+        ) & ~Q(operation_status__in=['5', '6'])  # Excluir anuladas y rechazadas
+
+        # 1. Obtener operaciones diarias agrupadas
+        daily_operations = []
+
+        # Agrupar por día
+        daily_data = Operation.objects.filter(base_filter).values(
+            'operation_date'
+        ).annotate(
+            day=Extract('operation_date', 'day'),
+            # Ventas (operationType = 'S')
+            total_sales=Sum(
+                'total_amount',
+                filter=Q(operation_type='S')
+            ),
+            sales_count=Count(
+                'id',
+                filter=Q(operation_type='S')
+            ),
+            # Compras (operationType = 'E')
+            total_purchases=Sum(
+                'total_amount',
+                filter=Q(operation_type='E')
+            ),
+            purchases_count=Count(
+                'id',
+                filter=Q(operation_type='E')
+            )
+        ).order_by('operation_date')
+
+        # Convertir a formato esperado
+        for day_data in daily_data:
+            daily_operations.append(DailyOperationType(
+                day=day_data['day'],
+                date=day_data['operation_date'].strftime('%Y-%m-%d'),
+                total_sales=float(day_data['total_sales'] or 0),
+                total_purchases=float(day_data['total_purchases'] or 0),
+                sales_count=day_data['sales_count'] or 0,
+                purchases_count=day_data['purchases_count'] or 0
+            ))
+
+        # 2. Obtener top productos
+        top_products = []
+
+        # Top productos vendidos (ventas)
+        top_sales = OperationDetail.objects.filter(
+            operation__company_id=company_id,
+            operation__operation_date__gte=start,
+            operation__operation_date__lte=end,
+            operation__operation_type='S'
+        ).exclude(
+            operation__operation_status__in=['5', '6']
+        ).values(
+            'product_id',
+            'product__description',
+            'product__code'
+        ).annotate(
+            total_quantity=Sum('quantity'),
+            total_amount=Sum('total_amount')
+        ).order_by('-total_amount')[:10]
+
+        for product in top_sales:
+            # Calcular precio promedio después de la agregación
+            avg_price = float(product['total_amount'] / product['total_quantity']) if product[
+                                                                                          'total_quantity'] > 0 else 0
+
+            top_products.append(TopProductType(
+                product_id=product['product_id'],
+                product_name=product['product__description'],
+                product_code=product['product__code'],
+                quantity=float(product['total_quantity']),
+                total_amount=float(product['total_amount']),
+                operation_type='S',
+                average_price=avg_price
+            ))
+
+        # Top productos comprados
+        top_purchases = OperationDetail.objects.filter(
+            operation__company_id=company_id,
+            operation__operation_date__gte=start,
+            operation__operation_date__lte=end,
+            operation__operation_type='E'
+        ).exclude(
+            operation__operation_status__in=['5', '6']
+        ).values(
+            'product_id',
+            'product__description',
+            'product__code'
+        ).annotate(
+            total_quantity=Sum('quantity'),
+            total_amount=Sum('total_amount')
+        ).order_by('-total_amount')[:10]
+
+        for product in top_purchases:
+            # Calcular precio promedio después de la agregación
+            avg_price = float(product['total_amount'] / product['total_quantity']) if product[
+                                                                                          'total_quantity'] > 0 else 0
+
+            top_products.append(TopProductType(
+                product_id=product['product_id'],
+                product_name=product['product__description'],
+                product_code=product['product__code'],
+                quantity=float(product['total_quantity']),
+                total_amount=float(product['total_amount']),
+                operation_type='E',
+                average_price=avg_price
+            ))
+
+        # 3. Calcular totales generales
+        totals = Operation.objects.filter(base_filter).aggregate(
+            total_sales=Sum(
+                'total_amount',
+                filter=Q(operation_type='S')
+            ),
+            total_purchases=Sum(
+                'total_amount',
+                filter=Q(operation_type='E')
+            ),
+            total_transactions=Count('id')
+        )
+
+        total_sales = float(totals['total_sales'] or 0)
+        total_purchases = float(totals['total_purchases'] or 0)
+        total_profit = total_sales - total_purchases
+
+        return MonthlyReportType(
+            daily_operations=daily_operations,
+            top_products=top_products,
+            total_transactions=totals['total_transactions'] or 0,
+            total_sales=total_sales,
+            total_purchases=total_purchases,
+            total_profit=total_profit
+        )
+
+    def resolve_monthly_summary(self, info, company_id, year, month):
+        from calendar import monthrange
+
+        # Calcular primer y último día del mes
+        first_day = date(year, month, 1)
+        last_day = date(year, month, monthrange(year, month)[1])
+
+        # Usar la misma lógica que monthly_report
+        return self.resolve_monthly_report(
+            info,
+            company_id,
+            first_day.strftime('%Y-%m-%d'),
+            last_day.strftime('%Y-%m-%d')
         )
 
 

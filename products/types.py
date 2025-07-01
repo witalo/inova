@@ -85,8 +85,11 @@ class UnitType(DjangoObjectType):
 class TopProductType(graphene.ObjectType):
     product_id = graphene.Int()
     product_name = graphene.String()
+    product_code = graphene.String()
     quantity = graphene.Float()
     total_amount = graphene.Float()
+    operation_type = graphene.String()
+    average_price = graphene.Float()
 
 
 class ProductInput(graphene.InputObjectType):
