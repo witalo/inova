@@ -117,3 +117,41 @@ class MonthlyReportType(graphene.ObjectType):
     total_sales = graphene.Float()
     total_purchases = graphene.Float()
     total_profit = graphene.Float()
+
+
+class SoldProductType(graphene.ObjectType):
+    product_id = graphene.Int()
+    product_name = graphene.String()
+    product_code = graphene.String()
+    quantity = graphene.Float()
+    unit = graphene.String()
+    unit_price = graphene.Float()
+    total = graphene.Float()
+    timestamp = graphene.String()
+    operation_id = graphene.Int()
+
+
+class HourlySalesType(graphene.ObjectType):
+    hour = graphene.Int()
+    sales_amount = graphene.Float()
+    sales_count = graphene.Int()
+
+
+class DailyReportType(graphene.ObjectType):
+    total_sales = graphene.Float()
+    total_purchases = graphene.Float()
+    sales_count = graphene.Int()
+    purchases_count = graphene.Int()
+    sales_growth = graphene.Float()
+    last_sold_products = graphene.List(SoldProductType)
+    hourly_sales = graphene.List(HourlySalesType)
+    top_selling_hour = graphene.String()
+
+
+class DailySummaryType(graphene.ObjectType):
+    total_sales = graphene.Float()
+    total_purchases = graphene.Float()
+    sales_count = graphene.Int()
+    purchases_count = graphene.Int()
+    balance = graphene.Float()
+    average_ticket = graphene.Float()

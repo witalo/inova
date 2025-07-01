@@ -1,6 +1,5 @@
 import graphene
 from django.db import transaction
-from django.db.models import Q, Count, Sum
 import logging
 
 from django.db.models.functions import Extract
@@ -11,7 +10,9 @@ from operations.models import Person
 from operations.mutations import PersonMutation, CreateOperation, CancelOperation, CreatePerson
 from operations.types import *
 from django.conf import settings
-from datetime import datetime, date
+from datetime import datetime, timedelta, date
+from django.db.models import Sum, Count, Q, F, Avg
+from django.utils import timezone
 import requests
 # Configurar logger
 logger = logging.getLogger(__name__)
@@ -73,6 +74,19 @@ class OperationsQuery(graphene.ObjectType):
         company_id=graphene.ID(required=True),
         year=graphene.Int(required=True),
         month=graphene.Int(required=True)
+    )
+    # Reporte diario completo
+    daily_report = graphene.Field(
+        DailyReportType,
+        company_id=graphene.Int(required=True),
+        date=graphene.String(required=False)
+    )
+
+    # Resumen diario rápido
+    daily_summary = graphene.Field(
+        DailySummaryType,
+        company_id=graphene.Int(required=True),
+        date=graphene.String(required=False)
     )
 
     @staticmethod
@@ -530,6 +544,181 @@ class OperationsQuery(graphene.ObjectType):
             company_id,
             first_day.strftime('%Y-%m-%d'),
             last_day.strftime('%Y-%m-%d')
+        )
+
+    @staticmethod
+    def resolve_daily_report(root, info, company_id, date=None):
+        # Si no se especifica fecha, usar hoy
+        if not date:
+            target_date = timezone.now().date()
+        else:
+            target_date = datetime.strptime(date, '%Y-%m-%d').date()
+
+        # Fecha del día anterior para comparación
+        previous_date = target_date - timedelta(days=1)
+
+        # Filtro base para el día actual
+        base_filter = Q(
+            company_id=company_id,
+            operation_date=target_date
+        ) & ~Q(operation_status__in=['5', '6'])  # Excluir anuladas y rechazadas
+
+        # 1. Obtener totales del día
+        daily_totals = Operation.objects.filter(base_filter).aggregate(
+            total_sales=Sum(
+                'total_amount',
+                filter=Q(operation_type='S')
+            ),
+            sales_count=Count(
+                'id',
+                filter=Q(operation_type='S')
+            ),
+            total_purchases=Sum(
+                'total_amount',
+                filter=Q(operation_type='E')
+            ),
+            purchases_count=Count(
+                'id',
+                filter=Q(operation_type='E')
+            )
+        )
+
+        # 2. Calcular crecimiento comparado con el día anterior
+        previous_sales = Operation.objects.filter(
+            company_id=company_id,
+            operation_date=previous_date,
+            operation_type='S'
+        ).exclude(
+            operation_status__in=['5', '6']
+        ).aggregate(
+            total=Sum('total_amount')
+        )['total'] or 0
+
+        current_sales = daily_totals['total_sales'] or 0
+        sales_growth = 0
+        if previous_sales > 0:
+            sales_growth = ((current_sales - previous_sales) / previous_sales) * 100
+
+        # 3. Obtener últimos productos vendidos (últimas 10 operaciones del día)
+        last_operations = Operation.objects.filter(
+            base_filter,
+            operation_type='S'
+        ).order_by('-emit_time', '-id')[:10]
+
+        last_sold_products = []
+        for operation in last_operations:
+            details = OperationDetail.objects.filter(
+                operation=operation
+            ).select_related('product', 'product__unit')[:3]  # Máximo 3 productos por operación
+
+            for detail in details:
+                if detail.product:  # Verificar que el producto existe
+                    last_sold_products.append(SoldProductType(
+                        product_id=detail.product.id,
+                        product_name=detail.product.description or '',
+                        product_code=detail.product.code or '',
+                        quantity=float(detail.quantity or 0),
+                        unit=detail.product.unit.description if detail.product.unit else 'UND',
+                        unit_price=float(detail.unit_price or 0),
+                        total=float(detail.total_amount or 0),
+                        timestamp=operation.emit_time.isoformat() if operation.emit_time else '',
+                        operation_id=operation.id
+                    ))
+
+        # Limitar a los últimos 15 productos
+        last_sold_products = last_sold_products[:15]
+
+        # 4. Ventas por hora del día (usando SQL raw para EXTRACT)
+        from django.db import connection
+
+        hourly_sales = []
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                    SELECT 
+                        EXTRACT(hour FROM emit_time) as hour,
+                        SUM(total_amount) as sales_amount,
+                        COUNT(*) as sales_count
+                    FROM operations_operation
+                    WHERE company_id = %s 
+                        AND operation_date = %s 
+                        AND operation_type = 'S'
+                        AND operation_status NOT IN ('5', '6')
+                        AND emit_time IS NOT NULL
+                    GROUP BY EXTRACT(hour FROM emit_time)
+                    ORDER BY hour
+                """, [company_id, target_date])
+
+            for row in cursor.fetchall():
+                hourly_sales.append(HourlySalesType(
+                    hour=int(row[0]),
+                    sales_amount=float(row[1] or 0),
+                    sales_count=row[2] or 0
+                ))
+
+        # 5. Hora con más ventas
+        top_selling_hour = ''
+        if hourly_sales:
+            top_hour = max(hourly_sales, key=lambda x: x.sales_amount)
+            top_selling_hour = f"{top_hour.hour:02d}:00"
+
+        return DailyReportType(
+            total_sales=float(daily_totals['total_sales'] or 0),
+            total_purchases=float(daily_totals['total_purchases'] or 0),
+            sales_count=daily_totals['sales_count'] or 0,
+            purchases_count=daily_totals['purchases_count'] or 0,
+            sales_growth=float(sales_growth),
+            last_sold_products=last_sold_products,
+            hourly_sales=hourly_sales,
+            top_selling_hour=top_selling_hour
+        )
+
+    @staticmethod
+    def resolve_daily_summary(root, info, company_id, date=None):
+        # Resumen rápido sin detalles
+        if not date:
+            target_date = timezone.now().date()
+        else:
+            target_date = datetime.strptime(date, '%Y-%m-%d').date()
+
+        # Una sola consulta optimizada
+        summary = Operation.objects.filter(
+            company_id=company_id,
+            operation_date=target_date
+        ).exclude(
+            operation_status__in=['5', '6']
+        ).aggregate(
+            total_sales=Sum(
+                'total_amount',
+                filter=Q(operation_type='S')
+            ),
+            sales_count=Count(
+                'id',
+                filter=Q(operation_type='S')
+            ),
+            total_purchases=Sum(
+                'total_amount',
+                filter=Q(operation_type='E')
+            ),
+            purchases_count=Count(
+                'id',
+                filter=Q(operation_type='E')
+            ),
+            average_ticket=Avg(
+                'total_amount',
+                filter=Q(operation_type='S')
+            )
+        )
+
+        total_sales = float(summary['total_sales'] or 0)
+        total_purchases = float(summary['total_purchases'] or 0)
+
+        return DailySummaryType(
+            total_sales=total_sales,
+            total_purchases=total_purchases,
+            sales_count=summary['sales_count'] or 0,
+            purchases_count=summary['purchases_count'] or 0,
+            balance=total_sales - total_purchases,
+            average_ticket=float(summary['average_ticket'] or 0)
         )
 
 
