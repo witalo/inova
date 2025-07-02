@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 class OperationsQuery(graphene.ObjectType):
     # Documentos
-    documents = graphene.List(DocumentType)
+    documents = graphene.List(DocumentType, company_id=graphene.ID(required=True))
     serials_by_document = graphene.List(
         SerialType,
         document_id=graphene.ID(required=True)
@@ -90,8 +90,8 @@ class OperationsQuery(graphene.ObjectType):
     )
 
     @staticmethod
-    def resolve_documents(root, info):
-        return Document.objects.all().order_by('code')
+    def resolve_documents(root, info, company_id):
+        return Document.objects.filter(company_id=company_id).order_by('code')
 
     @staticmethod
     def resolve_serials_by_document(root, info, document_id):
@@ -99,10 +99,10 @@ class OperationsQuery(graphene.ObjectType):
 
     @staticmethod
     def resolve_operations_by_date(root, info, company_id, date, operation_type):
-        operation_date = datetime.strptime(date, '%Y-%m-%d').date()
+        emit_date = datetime.strptime(date, '%Y-%m-%d').date()
         return Operation.objects.filter(
             company_id=company_id,
-            operation_date=operation_date,
+            emit_date=emit_date,
             operation_type=operation_type
         ).select_related(
             'document', 'person', 'user'
@@ -319,7 +319,7 @@ class OperationsQuery(graphene.ObjectType):
 
         operations = Operation.objects.filter(
             company_id=company_id,
-            operation_date__range=[start, end],
+            emit_date__range=[start, end],
             operation_type='S',
             operation_status__in=['1', '2']
         )
@@ -366,13 +366,13 @@ class OperationsQuery(graphene.ObjectType):
 
         queryset = Operation.objects.filter(
             company_id=company_id,
-            operation_date__range=[start, end]
+            emit_date__range=[start, end]
         ).select_related('document', 'person', 'user')
 
         if operation_type:
             queryset = queryset.filter(operation_type=operation_type)
 
-        return queryset.order_by('-operation_date', '-created_at')
+        return queryset.order_by('-emit_date', '-created_at')
 
     @staticmethod
     def resolve_pending_operations(root, info, company_id):
@@ -395,8 +395,8 @@ class OperationsQuery(graphene.ObjectType):
         # Filtro base para operaciones válidas
         base_filter = Q(
             company_id=company_id,
-            operation_date__gte=start,
-            operation_date__lte=end
+            emit_date__gte=start,
+            emit_date__lte=end
         ) & ~Q(operation_status__in=['5', '6'])  # Excluir anuladas y rechazadas
 
         # 1. Obtener operaciones diarias agrupadas
@@ -404,9 +404,9 @@ class OperationsQuery(graphene.ObjectType):
 
         # Agrupar por día
         daily_data = Operation.objects.filter(base_filter).values(
-            'operation_date'
+            'emit_date'
         ).annotate(
-            day=Extract('operation_date', 'day'),
+            day=Extract('emit_date', 'day'),
             # Ventas (operationType = 'S')
             total_sales=Sum(
                 'total_amount',
@@ -425,13 +425,13 @@ class OperationsQuery(graphene.ObjectType):
                 'id',
                 filter=Q(operation_type='E')
             )
-        ).order_by('operation_date')
+        ).order_by('emit_date')
 
         # Convertir a formato esperado
         for day_data in daily_data:
             daily_operations.append(DailyOperationType(
                 day=day_data['day'],
-                date=day_data['operation_date'].strftime('%Y-%m-%d'),
+                date=day_data['emit_date'].strftime('%Y-%m-%d'),
                 total_sales=float(day_data['total_sales'] or 0),
                 total_purchases=float(day_data['total_purchases'] or 0),
                 sales_count=day_data['sales_count'] or 0,
@@ -444,8 +444,8 @@ class OperationsQuery(graphene.ObjectType):
         # Top productos vendidos (ventas)
         top_sales = OperationDetail.objects.filter(
             operation__company_id=company_id,
-            operation__operation_date__gte=start,
-            operation__operation_date__lte=end,
+            operation__emit_date__gte=start,
+            operation__emit_date__lte=end,
             operation__operation_type='S'
         ).exclude(
             operation__operation_status__in=['5', '6']
@@ -476,8 +476,8 @@ class OperationsQuery(graphene.ObjectType):
         # Top productos comprados
         top_purchases = OperationDetail.objects.filter(
             operation__company_id=company_id,
-            operation__operation_date__gte=start,
-            operation__operation_date__lte=end,
+            operation__emit_date__gte=start,
+            operation__emit_date__lte=end,
             operation__operation_type='E'
         ).exclude(
             operation__operation_status__in=['5', '6']
@@ -560,7 +560,7 @@ class OperationsQuery(graphene.ObjectType):
         # Filtro base para el día actual
         base_filter = Q(
             company_id=company_id,
-            operation_date=target_date
+            emit_date=target_date
         ) & ~Q(operation_status__in=['5', '6'])  # Excluir anuladas y rechazadas
 
         # 1. Obtener totales del día
@@ -586,7 +586,7 @@ class OperationsQuery(graphene.ObjectType):
         # 2. Calcular crecimiento comparado con el día anterior
         previous_sales = Operation.objects.filter(
             company_id=company_id,
-            operation_date=previous_date,
+            emit_date=previous_date,
             operation_type='S'
         ).exclude(
             operation_status__in=['5', '6']
@@ -640,7 +640,7 @@ class OperationsQuery(graphene.ObjectType):
                         COUNT(*) as sales_count
                     FROM operations_operation
                     WHERE company_id = %s 
-                        AND operation_date = %s 
+                        AND emit_date = %s 
                         AND operation_type = 'S'
                         AND operation_status NOT IN ('5', '6')
                         AND emit_time IS NOT NULL
@@ -683,7 +683,7 @@ class OperationsQuery(graphene.ObjectType):
         # Una sola consulta optimizada
         summary = Operation.objects.filter(
             company_id=company_id,
-            operation_date=target_date
+            emit_date=target_date
         ).exclude(
             operation_status__in=['5', '6']
         ).aggregate(

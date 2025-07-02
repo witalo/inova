@@ -6,6 +6,7 @@ class Document(models.Model):
     id = models.AutoField(primary_key=True)
     code = models.CharField(max_length=15, null=True, blank=True)
     description = models.CharField('Descripción', max_length=100, null=True, blank=True)
+    company = models.ForeignKey('users.Company', on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
