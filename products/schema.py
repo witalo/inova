@@ -175,63 +175,6 @@ class ProductsQuery(graphene.ObjectType):
         return Unit.objects.all().order_by('id')
 
 
-# VERSIÓN ALTERNATIVA SUPER OPTIMIZADA CON MYSQL FULLTEXT
-# class QueryFullText(graphene.ObjectType):
-#     """Usar esta versión si tienes MySQL 5.6+ con índices FULLTEXT"""
-#
-#     search_products_fast = graphene.List(
-#         ProductType,
-#         search=graphene.String(required=True),
-#         company_id=graphene.ID(required=True),
-#         limit=graphene.Int(default_value=20)
-#     )
-#
-#     def resolve_search_products_fast(self, info, search, company_id, limit=20):
-#         """
-#         Versión ultra rápida usando FULLTEXT de MySQL
-#         """
-#         from django.db import connection
-#
-#         search = search.strip()
-#         if not search or len(search) < 2:
-#             return []
-#
-#         # Escapar caracteres especiales para SQL
-#         search_escaped = search.replace("'", "''")
-#
-#         # Query nativa optimizada con FULLTEXT
-#         query = """
-#             SELECT p.*,
-#                    GREATEST(
-#                        MATCH(description) AGAINST(%s IN BOOLEAN MODE),
-#                        MATCH(code) AGAINST(%s IN BOOLEAN MODE)
-#                    ) as relevance
-#             FROM products_product p
-#             WHERE p.company_id = %s
-#               AND p.is_active = 1
-#               AND (
-#                   MATCH(description) AGAINST(%s IN BOOLEAN MODE) > 0
-#                   OR MATCH(code) AGAINST(%s IN BOOLEAN MODE) > 0
-#                   OR description LIKE %s
-#                   OR code LIKE %s
-#               )
-#             ORDER BY relevance DESC, description ASC
-#             LIMIT %s
-#         """
-#
-#         # Preparar parámetros
-#         search_boolean = '+' + ' +'.join(search.split())  # Todas las palabras requeridas
-#         like_pattern = f'%{search}%'
-#
-#         products = Product.objects.raw(
-#             query,
-#             [search_boolean, search_boolean, company_id,
-#              search_boolean, search_boolean, like_pattern, like_pattern, limit]
-#         )
-#
-#         return list(products)
-
-
 class ProductsMutation(graphene.ObjectType):
     save_product = ProductMutation.Field()
     delete_product = DeleteProductMutation.Field()
