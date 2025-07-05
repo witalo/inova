@@ -1,3 +1,6 @@
+import re
+from multiprocessing import Value
+
 import graphene
 from django.db import transaction
 import logging
@@ -11,7 +14,7 @@ from operations.mutations import PersonMutation, CreateOperation, CancelOperatio
 from operations.types import *
 from django.conf import settings
 from datetime import datetime, timedelta, date
-from django.db.models import Sum, Count, Q, F, Avg
+from django.db.models import Sum, Count, Q, F, Avg, When, Case, IntegerField
 from django.utils import timezone
 import requests
 # Configurar logger
@@ -61,6 +64,12 @@ class OperationsQuery(graphene.ObjectType):
     search_person = graphene.List(
         PersonType,
         document=graphene.String(required=True)
+    )
+    # Búsqueda avanzada de personas
+    search_persons_advanced = graphene.List(
+        PersonType,
+        search=graphene.String(required=True),
+        limit=graphene.Int(default_value=20)
     )
 
     monthly_report = graphene.Field(
@@ -311,6 +320,119 @@ class OperationsQuery(graphene.ObjectType):
         except Exception as e:
             logger.error(f"Error general en search_person: {str(e)}", exc_info=True)
             return []
+
+    def resolve_search_persons_advanced(self, info, search, limit=20):
+        """
+        Búsqueda avanzada de personas con tolerancia a errores
+        Similar a la búsqueda de productos
+        """
+        search = search.strip().lower()
+        if not search or len(search) < 2:
+            return []
+
+        # Limpiar caracteres especiales pero mantener espacios
+        search_clean = re.sub(r'[^\w\s]', '', search)
+        words = search_clean.split()
+
+        if not words:
+            return []
+
+        # ESTRATEGIA 1: Búsqueda exacta por documento
+        exact_doc_query = Q(document__iexact=search)
+
+        # ESTRATEGIA 2: Documento contiene la búsqueda
+        doc_contains_query = Q(document__icontains=search)
+
+        # ESTRATEGIA 3: Nombre exacto
+        name_exact_query = Q(full_name__iexact=search)
+
+        # ESTRATEGIA 4: Contiene la frase completa en el nombre
+        name_phrase_query = Q(full_name__icontains=search)
+
+        # ESTRATEGIA 5: Todas las palabras en el nombre (AND)
+        all_words_query = Q()
+        for word in words:
+            all_words_query &= Q(full_name__icontains=word)
+
+        # ESTRATEGIA 6: Al menos una palabra (OR)
+        any_word_query = Q()
+        for word in words:
+            if len(word) >= 2:
+                any_word_query |= Q(full_name__icontains=word)
+
+        # ESTRATEGIA 7: Empieza con la primera palabra
+        prefix_query = Q()
+        if words:
+            first_word = words[0]
+            if len(first_word) >= 2:
+                prefix_query = Q(full_name__istartswith=first_word)
+
+        # Obtener personas base
+        base_queryset = Person.objects.all()
+
+        # Ejecutar búsqueda con scoring
+        persons = base_queryset.annotate(
+            relevance_score=Case(
+                # Documento exacto = 100 puntos
+                When(exact_doc_query, then=Value(100)),
+                # Documento contiene = 90 puntos
+                When(doc_contains_query, then=Value(90)),
+                # Nombre exacto = 85 puntos
+                When(name_exact_query, then=Value(85)),
+                # Contiene frase completa en nombre = 80 puntos
+                When(name_phrase_query, then=Value(80)),
+                # Todas las palabras = 70 puntos
+                When(all_words_query, then=Value(70)),
+                # Empieza con primera palabra = 60 puntos
+                When(prefix_query, then=Value(60)),
+                # Al menos una palabra = 50 puntos
+                When(any_word_query, then=Value(50)),
+                default=Value(0),
+                output_field=IntegerField()
+            )
+        ).filter(
+            relevance_score__gt=0
+        ).order_by('-relevance_score', 'full_name')[:limit * 2]
+
+        # Si ya tenemos buenos resultados, retornarlos
+        if len(persons) <= limit:
+            return persons
+
+        # Similitud adicional para refinar resultados
+        scored_persons = []
+        for person in persons:
+            name_lower = person.full_name.lower() if person.full_name else ""
+            doc_lower = person.document.lower() if person.document else ""
+
+            # Calcular similitud
+            name_similarity = self._quick_similarity(search, name_lower)
+            doc_similarity = self._quick_similarity(search, doc_lower)
+
+            # Bonus si contiene todas las palabras en orden
+            order_bonus = 10 if all(word in name_lower for word in words) else 0
+
+            # Score final
+            final_score = person.relevance_score + (max(name_similarity, doc_similarity) * 20) + order_bonus
+
+            scored_persons.append({
+                'person': person,
+                'score': final_score
+            })
+
+        # Ordenar y retornar los mejores
+        scored_persons.sort(key=lambda x: x['score'], reverse=True)
+        return [item['person'] for item in scored_persons[:limit]]
+
+    @staticmethod
+    def _quick_similarity(self, search, text):
+        """Cálculo rápido de similitud"""
+        if not text:
+            return 0
+        if search in text:
+            return 1.0
+
+        common = sum(1 for char in search if char in text)
+        return common / len(search) if search else 0
 
     @staticmethod
     def resolve_sales_summary(root, info, company_id, start_date, end_date):
