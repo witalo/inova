@@ -1,6 +1,4 @@
 import re
-from multiprocessing import Value
-
 import graphene
 from django.db import transaction
 import logging
@@ -14,9 +12,10 @@ from operations.mutations import PersonMutation, CreateOperation, CancelOperatio
 from operations.types import *
 from django.conf import settings
 from datetime import datetime, timedelta, date
-from django.db.models import Sum, Count, Q, F, Avg, When, Case, IntegerField
+from django.db.models import Sum, Value, Count, Q, F, Avg, When, Case, IntegerField
 from django.utils import timezone
 import requests
+
 # Configurar logger
 logger = logging.getLogger(__name__)
 
@@ -324,7 +323,6 @@ class OperationsQuery(graphene.ObjectType):
     def resolve_search_persons_advanced(self, info, search, limit=20):
         """
         Búsqueda avanzada de personas con tolerancia a errores
-        Similar a la búsqueda de productos
         """
         search = search.strip().lower()
         if not search or len(search) < 2:
@@ -423,7 +421,6 @@ class OperationsQuery(graphene.ObjectType):
         scored_persons.sort(key=lambda x: x['score'], reverse=True)
         return [item['person'] for item in scored_persons[:limit]]
 
-    @staticmethod
     def _quick_similarity(self, search, text):
         """Cálculo rápido de similitud"""
         if not text:
