@@ -5,7 +5,8 @@ from decimal import Decimal
 from datetime import datetime
 import graphene
 from django.db import transaction
-
+from django.utils import timezone
+from datetime import datetime, date, time
 from finances.models import Payment
 from finances.types import PaymentInput
 from operations.models import Person, Serial, Operation, OperationDetail
@@ -148,6 +149,8 @@ class CreateOperation(graphene.Mutation):
                 serial = serial_document.serial
                 next_number = generate_next_number(serial, company_id, operation_type)
 
+            user_id = kwargs['user_id']
+
             # Crear la operación
             operation = Operation.objects.create(
                 document_id=document_id,
@@ -159,7 +162,7 @@ class CreateOperation(graphene.Mutation):
                 emit_date=emit_date,
                 emit_time=emit_time,
                 person_id=kwargs.get('person_id'),
-                user_id=kwargs['user_id'],
+                user_id=user_id,
                 company_id=company_id,
                 currency=kwargs['currency'],
                 global_discount_percent=kwargs['global_discount_percent'],
@@ -225,20 +228,21 @@ class CreateOperation(graphene.Mutation):
 
             # Si no hay pagos o is_payment está deshabilitado, crear pago automático
             if not payments:
-                # Obtener la configuración de la empresa
-                from users.models import Company
-                company = Company.objects.get(id=company_id)
+                # Convertir date a datetime con timezone
+                payment_datetime = timezone.make_aware(
+                    datetime.combine(emit_date, time.min)
+                )
 
                 # Si no tiene pagos habilitados, crear pago automático al contado/efectivo
                 Payment.objects.create(
                     payment_type='CN',  # Contado
-                    payment_method='A',  # Efectivo
+                    payment_method='E',  # Efectivo
                     status='C',  # Cancelado
                     notes='Pago automático al contado',
-                    user_id=kwargs['user_id'],
+                    user_id=user_id,
                     operation=operation,
                     company_id=company_id,
-                    payment_date=emit_date,
+                    payment_date=payment_datetime,
                     total_amount=operation.total_amount,
                     paid_amount=operation.total_amount
                 )
@@ -246,7 +250,11 @@ class CreateOperation(graphene.Mutation):
             else:
                 # Crear los pagos enviados desde el frontend
                 for payment_data in payments:
+                    # Parsear la fecha y convertirla a datetime con timezone
                     payment_date = datetime.strptime(payment_data['payment_date'], '%Y-%m-%d').date()
+                    payment_datetime = timezone.make_aware(
+                        datetime.combine(payment_date, time.min)
+                    )
                     paid_amount = Decimal(str(payment_data['paid_amount']))
 
                     Payment.objects.create(
@@ -257,14 +265,17 @@ class CreateOperation(graphene.Mutation):
                         user_id=kwargs['user_id'],
                         operation=operation,
                         company_id=company_id,
-                        payment_date=payment_date,
+                        payment_date=payment_datetime,  # Usar datetime con timezone
                         total_amount=operation.total_amount,
                         paid_amount=paid_amount
                     )
                     total_paid += paid_amount
 
-            # Validar que el total pagado coincida con el total de la operación
-            if abs(total_paid - operation.total_amount) > Decimal('0.01'):
+            # Convertir ambos valores a Decimal
+            total_paid_decimal = Decimal(str(total_paid))
+            operation_total_decimal = Decimal(str(operation.total_amount))
+
+            if abs(total_paid_decimal - operation_total_decimal) > Decimal('0.01'):
                 raise Exception(
                     f'El total pagado ({total_paid}) no coincide con el total de la operación ({operation.total_amount})')
 

@@ -16,7 +16,7 @@ class CompanyType(DjangoObjectType):
         fields = (
             'id', 'ruc', 'denomination', 'address', 'phone',
             'email', 'igv_percentage', 'pdf_size', 'pdf_color',
-            'is_active'
+            'is_active', 'is_payment'
         )
 
         def resolve_logo_base64(self, info):

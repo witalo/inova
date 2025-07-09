@@ -9,7 +9,7 @@ class Payment(models.Model):
     ]
     # Métodos de pago para contado
     PAYMENT_METHODS = [
-        ('A', 'EFECTIVO'),
+        ('E', 'EFECTIVO'),
         ('Y', 'YAPE'),
         ('P', 'PLIN'),
         ('T', 'TARJETA'),

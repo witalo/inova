@@ -32,10 +32,19 @@ class ProductType(DjangoObjectType):
         """Convierte la imagen almacenada a base64 para enviar al frontend"""
         if self.photo and self.photo.name:
             try:
-                # Abrir y leer la imagen
-                self.photo.open('rb')
-                image_data = self.photo.read()
-                self.photo.close()
+                # Verificar si el archivo existe físicamente
+                photo_path = self.photo.path
+
+                if not os.path.exists(photo_path):
+                    print(f"Archivo no encontrado: {photo_path}")
+                    # Opcionalmente, limpiar la referencia en la BD
+                    self.photo = None
+                    self.save()
+                    return None
+
+                # Abrir y leer la imagen de manera segura
+                with open(photo_path, 'rb') as image_file:
+                    image_data = image_file.read()
 
                 # Detectar el tipo de imagen usando múltiples métodos
                 image_type = None
@@ -60,10 +69,52 @@ class ProductType(DjangoObjectType):
                 base64_string = base64.b64encode(image_data).decode('utf-8')
                 return f"data:image/{image_type};base64,{base64_string}"
 
+            except FileNotFoundError:
+                print(f"Archivo de imagen no encontrado: {self.photo.name}")
+                return None
+            except PermissionError:
+                print(f"Sin permisos para leer el archivo: {self.photo.name}")
+                return None
             except Exception as e:
                 print(f"Error al convertir imagen a base64: {e}")
                 return None
         return None
+    # def resolve_photo_base64(self, info):
+    #     """Convierte la imagen almacenada a base64 para enviar al frontend"""
+    #     if self.photo and self.photo.name:
+    #         try:
+    #             # Abrir y leer la imagen
+    #             self.photo.open('rb')
+    #             image_data = self.photo.read()
+    #             self.photo.close()
+    #
+    #             # Detectar el tipo de imagen usando múltiples métodos
+    #             image_type = None
+    #
+    #             # Método 1: Por extensión del archivo
+    #             if '.' in self.photo.name:
+    #                 ext = self.photo.name.split('.')[-1].lower()
+    #                 if ext in ['jpg', 'jpeg', 'png', 'webp', 'gif']:
+    #                     image_type = 'jpeg' if ext == 'jpg' else ext
+    #
+    #             # Método 2: Por contenido usando imghdr
+    #             if not image_type:
+    #                 detected_type = imghdr.what(None, h=image_data)
+    #                 if detected_type:
+    #                     image_type = detected_type
+    #
+    #             # Fallback
+    #             if not image_type:
+    #                 image_type = 'jpeg'
+    #
+    #             # Convertir a base64
+    #             base64_string = base64.b64encode(image_data).decode('utf-8')
+    #             return f"data:image/{image_type};base64,{base64_string}"
+    #
+    #         except Exception as e:
+    #             print(f"Error al convertir imagen a base64: {e}")
+    #             return None
+    #     return None
 
 
 class TypeAffectationType(DjangoObjectType):
