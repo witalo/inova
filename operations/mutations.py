@@ -6,6 +6,8 @@ from datetime import datetime
 import graphene
 from django.db import transaction
 
+from finances.models import Payment
+from finances.types import PaymentInput
 from operations.models import Person, Serial, Operation, OperationDetail
 from operations.types import PersonInput, PersonType, OperationDetailInput, OperationType
 from operations.views import generate_next_number
@@ -111,6 +113,7 @@ class CreateOperation(graphene.Mutation):
         total_free = graphene.Float(default_value=0)
         total_amount = graphene.Float(required=True)
         items = graphene.List(OperationDetailInput, required=True)
+        payments = graphene.List(PaymentInput, required=True)  # Nuevo campo
 
     operation = graphene.Field(OperationType)
     success = graphene.Boolean()
@@ -119,28 +122,32 @@ class CreateOperation(graphene.Mutation):
     @transaction.atomic
     def mutate(self, info, **kwargs):
         try:
-
             print('Operacion:', kwargs)
+
+            # Parsear fechas
             operation_date = datetime.strptime(kwargs['operation_date'], '%Y-%m-%d').date()
             emit_date = datetime.strptime(kwargs['emit_date'], '%Y-%m-%d').date()
             emit_time = datetime.strptime(kwargs['emit_time'], '%H:%M:%S').time()
+
             operation_type = kwargs['operation_type']
             company_id = kwargs['company_id']
-            document_id = kwargs['document_id']
+            document_id = kwargs.get('document_id')
             serial = None
             next_number = None
+
+            # Lógica existente para serial y número
             if operation_type == "E":
-                serial = kwargs['serial']
-                next_number = kwargs['number']
+                serial = kwargs.get('serial', '')
+                next_number = kwargs.get('number', 0)
                 document_id = None
                 if serial == "" or next_number == 0:
                     serial = "E001"
                     next_number = generate_next_number(serial, company_id, operation_type)
             elif operation_type == "S":
-                # Obtener el siguiente número
                 serial_document = Serial.objects.get(id=kwargs['serial_id'])
                 serial = serial_document.serial
                 next_number = generate_next_number(serial, company_id, operation_type)
+
             # Crear la operación
             operation = Operation.objects.create(
                 document_id=document_id,
@@ -167,28 +174,26 @@ class CreateOperation(graphene.Mutation):
                 total_amount=kwargs['total_amount']
             )
 
-            # Crear los detalles
+            # Crear los detalles (código existente)
             for item in kwargs['items']:
                 product = Product.objects.get(id=item['product_id'])
 
-                # Calcular valores del detalle
                 quantity = Decimal(str(item['quantity']))
                 unit_value = Decimal(str(item['unit_value']))
                 unit_price = Decimal(str(item['unit_price']))
-                discount_percentage = Decimal(str(item['discount_percentage']))
+                discount_percentage = Decimal(str(item.get('discount_percentage', 0)))
 
                 total_value = quantity * unit_value
                 total_discount = total_value * (discount_percentage / 100)
                 total_value_after_discount = total_value - total_discount
 
-                # Calcular IGV según tipo de afectación
                 type_affectation = TypeAffectation.objects.get(code=item['type_affectation_id'])
                 if type_affectation.code == 10:  # Gravada
                     total_igv = total_value_after_discount * (Decimal(str(kwargs['igv_percent'])) / 100)
                 else:
                     total_igv = Decimal('0')
 
-                total_amount = total_value_after_discount + total_igv
+                total_amount_detail = total_value_after_discount + total_igv
 
                 OperationDetail.objects.create(
                     operation=operation,
@@ -202,10 +207,10 @@ class CreateOperation(graphene.Mutation):
                     total_discount=total_discount,
                     total_value=total_value_after_discount,
                     total_igv=total_igv,
-                    total_amount=total_amount
+                    total_amount=total_amount_detail
                 )
 
-                # Actualizar stock si es salida o entrada
+                # Actualizar stock
                 if operation_type == 'S':
                     product.stock -= quantity
                     product.save()
@@ -213,6 +218,55 @@ class CreateOperation(graphene.Mutation):
                     product.stock += quantity
                     product.purchase_price = unit_price
                     product.save()
+
+            # NUEVO: Crear los pagos
+            payments = kwargs.get('payments', [])
+            total_paid = Decimal('0')
+
+            # Si no hay pagos o is_payment está deshabilitado, crear pago automático
+            if not payments:
+                # Obtener la configuración de la empresa
+                from users.models import Company
+                company = Company.objects.get(id=company_id)
+
+                # Si no tiene pagos habilitados, crear pago automático al contado/efectivo
+                Payment.objects.create(
+                    payment_type='CN',  # Contado
+                    payment_method='A',  # Efectivo
+                    status='C',  # Cancelado
+                    notes='Pago automático al contado',
+                    user_id=kwargs['user_id'],
+                    operation=operation,
+                    company_id=company_id,
+                    payment_date=emit_date,
+                    total_amount=operation.total_amount,
+                    paid_amount=operation.total_amount
+                )
+                total_paid = operation.total_amount
+            else:
+                # Crear los pagos enviados desde el frontend
+                for payment_data in payments:
+                    payment_date = datetime.strptime(payment_data['payment_date'], '%Y-%m-%d').date()
+                    paid_amount = Decimal(str(payment_data['paid_amount']))
+
+                    Payment.objects.create(
+                        payment_type=payment_data['payment_type'],
+                        payment_method=payment_data['payment_method'],
+                        status=payment_data.get('status', 'C'),
+                        notes=payment_data.get('notes', ''),
+                        user_id=kwargs['user_id'],
+                        operation=operation,
+                        company_id=company_id,
+                        payment_date=payment_date,
+                        total_amount=operation.total_amount,
+                        paid_amount=paid_amount
+                    )
+                    total_paid += paid_amount
+
+            # Validar que el total pagado coincida con el total de la operación
+            if abs(total_paid - operation.total_amount) > Decimal('0.01'):
+                raise Exception(
+                    f'El total pagado ({total_paid}) no coincide con el total de la operación ({operation.total_amount})')
 
             return CreateOperation(
                 operation=operation,
@@ -227,6 +281,150 @@ class CreateOperation(graphene.Mutation):
                 success=False,
                 message=str(e)
             )
+
+
+# class CreateOperation(graphene.Mutation):
+#     class Arguments:
+#         document_id = graphene.ID()
+#         serial_id = graphene.ID()
+#         operation_type = graphene.String(required=True)
+#         operation_date = graphene.String(required=True)
+#         serial = graphene.String()
+#         number = graphene.Int()
+#         emit_date = graphene.String(required=True)
+#         emit_time = graphene.String(required=True)
+#         person_id = graphene.ID()
+#         user_id = graphene.ID(required=True)
+#         company_id = graphene.ID(required=True)
+#         currency = graphene.String(default_value='PEN')
+#         global_discount_percent = graphene.Float(default_value=0)
+#         global_discount = graphene.Float(default_value=0)
+#         total_discount = graphene.Float(default_value=0)
+#         igv_percent = graphene.Float(default_value=18)
+#         igv_amount = graphene.Float(required=True)
+#         total_taxable = graphene.Float(default_value=0)
+#         total_unaffected = graphene.Float(default_value=0)
+#         total_exempt = graphene.Float(default_value=0)
+#         total_free = graphene.Float(default_value=0)
+#         total_amount = graphene.Float(required=True)
+#         items = graphene.List(OperationDetailInput, required=True)
+#         payments = graphene.List(PaymentInput, required=True)
+#
+#     operation = graphene.Field(OperationType)
+#     success = graphene.Boolean()
+#     message = graphene.String()
+#
+#     @transaction.atomic
+#     def mutate(self, info, **kwargs):
+#         try:
+#
+#             print('Operacion:', kwargs)
+#             operation_date = datetime.strptime(kwargs['operation_date'], '%Y-%m-%d').date()
+#             emit_date = datetime.strptime(kwargs['emit_date'], '%Y-%m-%d').date()
+#             emit_time = datetime.strptime(kwargs['emit_time'], '%H:%M:%S').time()
+#             operation_type = kwargs['operation_type']
+#             company_id = kwargs['company_id']
+#             document_id = kwargs['document_id']
+#             serial = None
+#             next_number = None
+#             if operation_type == "E":
+#                 serial = kwargs['serial']
+#                 next_number = kwargs['number']
+#                 document_id = None
+#                 if serial == "" or next_number == 0:
+#                     serial = "E001"
+#                     next_number = generate_next_number(serial, company_id, operation_type)
+#             elif operation_type == "S":
+#                 # Obtener el siguiente número
+#                 serial_document = Serial.objects.get(id=kwargs['serial_id'])
+#                 serial = serial_document.serial
+#                 next_number = generate_next_number(serial, company_id, operation_type)
+#             # Crear la operación
+#             operation = Operation.objects.create(
+#                 document_id=document_id,
+#                 serial=serial,
+#                 number=next_number,
+#                 operation_type=operation_type,
+#                 operation_status='1',  # Registrado
+#                 operation_date=operation_date,
+#                 emit_date=emit_date,
+#                 emit_time=emit_time,
+#                 person_id=kwargs.get('person_id'),
+#                 user_id=kwargs['user_id'],
+#                 company_id=company_id,
+#                 currency=kwargs['currency'],
+#                 global_discount_percent=kwargs['global_discount_percent'],
+#                 global_discount=kwargs['global_discount'],
+#                 total_discount=kwargs['total_discount'],
+#                 igv_percent=kwargs['igv_percent'],
+#                 igv_amount=kwargs['igv_amount'],
+#                 total_taxable=kwargs['total_taxable'],
+#                 total_unaffected=kwargs['total_unaffected'],
+#                 total_exempt=kwargs['total_exempt'],
+#                 total_free=kwargs['total_free'],
+#                 total_amount=kwargs['total_amount']
+#             )
+#
+#             # Crear los detalles
+#             for item in kwargs['items']:
+#                 product = Product.objects.get(id=item['product_id'])
+#
+#                 # Calcular valores del detalle
+#                 quantity = Decimal(str(item['quantity']))
+#                 unit_value = Decimal(str(item['unit_value']))
+#                 unit_price = Decimal(str(item['unit_price']))
+#                 discount_percentage = Decimal(str(item['discount_percentage']))
+#
+#                 total_value = quantity * unit_value
+#                 total_discount = total_value * (discount_percentage / 100)
+#                 total_value_after_discount = total_value - total_discount
+#
+#                 # Calcular IGV según tipo de afectación
+#                 type_affectation = TypeAffectation.objects.get(code=item['type_affectation_id'])
+#                 if type_affectation.code == 10:  # Gravada
+#                     total_igv = total_value_after_discount * (Decimal(str(kwargs['igv_percent'])) / 100)
+#                 else:
+#                     total_igv = Decimal('0')
+#
+#                 total_amount = total_value_after_discount + total_igv
+#
+#                 OperationDetail.objects.create(
+#                     operation=operation,
+#                     product=product,
+#                     description=product.description,
+#                     type_affectation_id=item['type_affectation_id'],
+#                     quantity=quantity,
+#                     unit_value=unit_value,
+#                     unit_price=unit_price,
+#                     discount_percentage=discount_percentage,
+#                     total_discount=total_discount,
+#                     total_value=total_value_after_discount,
+#                     total_igv=total_igv,
+#                     total_amount=total_amount
+#                 )
+#
+#                 # Actualizar stock si es salida o entrada
+#                 if operation_type == 'S':
+#                     product.stock -= quantity
+#                     product.save()
+#                 elif operation_type == 'E':
+#                     product.stock += quantity
+#                     product.purchase_price = unit_price
+#                     product.save()
+#
+#             return CreateOperation(
+#                 operation=operation,
+#                 success=True,
+#                 message='Operación creada exitosamente'
+#             )
+#
+#         except Exception as e:
+#             transaction.set_rollback(True)
+#             return CreateOperation(
+#                 operation=None,
+#                 success=False,
+#                 message=str(e)
+#             )
 
 
 class CancelOperation(graphene.Mutation):

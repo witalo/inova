@@ -29,6 +29,7 @@ class Company(models.Model):
     pdf_size = models.CharField('Tamaño PDF', max_length=10, choices=PDF_SIZES, default='T')
     pdf_color = models.CharField('Color PDF', max_length=7, default='#000000')
     is_active = models.BooleanField('Activo', default=True)
+    is_payment = models.BooleanField('Activar Pago', default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
