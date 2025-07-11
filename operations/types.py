@@ -2,6 +2,7 @@ import graphene
 from django.db.models import Prefetch
 from graphene_django import DjangoObjectType
 
+from finances.types import PaymentType
 from operations.models import Person, Document, Serial, Operation, OperationDetail
 from products.models import Product, Unit
 from products.types import TopProductType
@@ -53,6 +54,7 @@ class OperationType(DjangoObjectType):
     total_amount = graphene.Float(required=True)
     global_discount = graphene.Float(required=True)
     global_discount_percent = graphene.Float(required=True)
+    payment_set = graphene.List(PaymentType)
 
     class Meta:
         model = Operation
@@ -63,6 +65,9 @@ class OperationType(DjangoObjectType):
 
     def resolve_details(self, info):
         return self.operationdetail_set.all()
+
+    def resolve_payment_set(self, info):
+        return self.payment_set.all()
 
 
 class OperationDetailType(DjangoObjectType):
