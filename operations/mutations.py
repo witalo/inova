@@ -221,7 +221,11 @@ class CreateOperation(graphene.Mutation):
                     product.stock += quantity
                     product.purchase_price = unit_price
                     product.save()
-
+            payment_type = 'I'
+            if operation_type == 'S':
+                payment_type = 'I'
+            elif operation_type == 'E':
+                payment_type = 'E'
             # NUEVO: Crear los pagos
             payments = kwargs.get('payments', [])
             total_paid = Decimal('0')
@@ -238,6 +242,7 @@ class CreateOperation(graphene.Mutation):
                     payment_type='CN',  # Contado
                     payment_method='E',  # Efectivo
                     status='C',  # Cancelado
+                    type=payment_type,
                     notes='Pago automático al contado',
                     user_id=user_id,
                     operation=operation,
@@ -261,6 +266,7 @@ class CreateOperation(graphene.Mutation):
                         payment_type=payment_data['payment_type'],
                         payment_method=payment_data['payment_method'],
                         status=payment_data.get('status', 'C'),
+                        type=payment_type,
                         notes=payment_data.get('notes', ''),
                         user_id=kwargs['user_id'],
                         operation=operation,

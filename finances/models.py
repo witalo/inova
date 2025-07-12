@@ -20,10 +20,15 @@ class Payment(models.Model):
         ('P', 'PENDIENTE'),
         ('C', 'CANCELADO'),
     ]
+    TYPE_CHOICES = [
+        ('I', 'INGRESO'),
+        ('E', 'EGRESO'),
+    ]
     id = models.AutoField(primary_key=True)
     payment_type = models.CharField(max_length=2, choices=PAYMENT_TYPES, default='CN')
     payment_method = models.CharField(max_length=1, choices=PAYMENT_METHODS, default='A')
     status = models.CharField(max_length=1, choices=STATUS_CHOICES, default='C')
+    type = models.CharField(max_length=1, choices=TYPE_CHOICES, default='I')
     notes = models.TextField(blank=True, null=True, verbose_name="Notas")
     user = models.ForeignKey('users.User', on_delete=models.CASCADE, null=True, blank=True)
     operation = models.ForeignKey('operations.Operation', on_delete=models.CASCADE, null=True, blank=True)
