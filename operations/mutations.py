@@ -222,10 +222,13 @@ class CreateOperation(graphene.Mutation):
                     product.purchase_price = unit_price
                     product.save()
             payment_type = 'I'
+            notes_operation = "SIN ESPECIFICAR"
             if operation_type == 'S':
                 payment_type = 'I'
+                notes_operation = "SALIDA DE PRODUCTOS"
             elif operation_type == 'E':
                 payment_type = 'E'
+                notes_operation = "ENTRADA DE PRODUCTOS"
             # NUEVO: Crear los pagos
             payments = kwargs.get('payments', [])
             total_paid = Decimal('0')
@@ -243,7 +246,7 @@ class CreateOperation(graphene.Mutation):
                     payment_method='E',  # Efectivo
                     status='C',  # Cancelado
                     type=payment_type,
-                    notes='Pago automático al contado',
+                    notes=notes_operation,
                     user_id=user_id,
                     operation=operation,
                     company_id=company_id,
@@ -261,13 +264,19 @@ class CreateOperation(graphene.Mutation):
                         datetime.combine(payment_date, time.min)
                     )
                     paid_amount = Decimal(str(payment_data['paid_amount']))
+                    # Versión mejorada con validación de notes
+                    notes = payment_data.get('notes', '')
+                    if not notes:  # Esto cubre None, '', '   ', etc.
+                        notes = notes_operation
+                    elif len(notes.strip()) <= 4:  # Si quieres descartar textos muy cortos
+                        notes = f"{notes_operation} - {notes}"
 
                     Payment.objects.create(
                         payment_type=payment_data['payment_type'],
                         payment_method=payment_data['payment_method'],
                         status=payment_data.get('status', 'C'),
                         type=payment_type,
-                        notes=payment_data.get('notes', ''),
+                        notes=notes,
                         user_id=kwargs['user_id'],
                         operation=operation,
                         company_id=company_id,
