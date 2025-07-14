@@ -9,6 +9,12 @@ from finances.models import Payment
 from finances.types import PaymentInput, PaymentType, UpdatePaymentInput
 from operations.models import Operation
 from users.models import User
+import pytz
+from django.utils import timezone
+from datetime import datetime
+
+# Definir la zona horaria de Perú
+peru_tz = pytz.timezone('America/Lima')
 
 
 class CreatePayment(graphene.Mutation):
@@ -21,8 +27,9 @@ class CreatePayment(graphene.Mutation):
 
     def mutate(self, info, input):
         try:
-            # Parsear fecha
-            payment_date = datetime.strptime(input.payment_date, '%Y-%m-%d')
+            # ✅ CORREGIDO: Parsear fecha y hora con zona horaria de Perú
+            naive_datetime = datetime.strptime(input.payment_date, '%Y-%m-%d %H:%M:%S')
+            payment_datetime = timezone.make_aware(naive_datetime, timezone=peru_tz)
 
             # Crear pago
             payment = Payment.objects.create(
@@ -31,7 +38,7 @@ class CreatePayment(graphene.Mutation):
                 payment_method=input.payment_method,
                 status=input.status,
                 notes=input.notes,
-                payment_date=payment_date,
+                payment_date=payment_datetime,  # ✅ CORREGIDO: Usar datetime con timezone
                 total_amount=decimal.Decimal(input.total_amount),
                 paid_amount=decimal.Decimal(input.paid_amount),
                 user_id=input.user_id,
@@ -50,6 +57,47 @@ class CreatePayment(graphene.Mutation):
                 success=False,
                 message=str(e)
             )
+
+
+# class CreatePayment(graphene.Mutation):
+#     class Arguments:
+#         input = PaymentInput(required=True)
+#
+#     payment = graphene.Field(PaymentType)
+#     success = graphene.Boolean()
+#     message = graphene.String()
+#
+#     def mutate(self, info, input):
+#         try:
+#             # Parsear fecha
+#             payment_date = datetime.strptime(input.payment_date, '%Y-%m-%d')
+#
+#             # Crear pago
+#             payment = Payment.objects.create(
+#                 type=input.type,
+#                 payment_type=input.payment_type,
+#                 payment_method=input.payment_method,
+#                 status=input.status,
+#                 notes=input.notes,
+#                 payment_date=payment_date,
+#                 total_amount=decimal.Decimal(input.total_amount),
+#                 paid_amount=decimal.Decimal(input.paid_amount),
+#                 user_id=input.user_id,
+#                 company_id=input.company_id,
+#                 operation_id=input.operation_id if hasattr(input, 'operation_id') else None
+#             )
+#
+#             return CreatePayment(
+#                 payment=payment,
+#                 success=True,
+#                 message="Pago creado exitosamente"
+#             )
+#         except Exception as e:
+#             return CreatePayment(
+#                 payment=None,
+#                 success=False,
+#                 message=str(e)
+#             )
 
 
 class UpdatePayment(graphene.Mutation):
@@ -137,5 +185,3 @@ class DeletePayment(graphene.Mutation):
                 success=False,
                 message=str(e)
             )
-
-

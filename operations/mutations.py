@@ -13,6 +13,11 @@ from operations.models import Person, Serial, Operation, OperationDetail
 from operations.types import PersonInput, PersonType, OperationDetailInput, OperationType
 from operations.views import generate_next_number
 from products.models import Product, TypeAffectation
+from django.utils import timezone
+import pytz
+
+# Definir la zona horaria de Perú
+peru_tz = pytz.timezone('America/Lima')
 
 
 class PersonMutation(graphene.Mutation):
@@ -235,9 +240,11 @@ class CreateOperation(graphene.Mutation):
 
             # Si no hay pagos o is_payment está deshabilitado, crear pago automático
             if not payments:
-                # Convertir date a datetime con timezone
+                # ✅ CORREGIDO: Usar emit_date con la hora actual en zona horaria de Perú
+                current_time_peru = timezone.now().astimezone(peru_tz).time()
                 payment_datetime = timezone.make_aware(
-                    datetime.combine(emit_date, time.min)
+                    datetime.combine(emit_date, current_time_peru),
+                    timezone=peru_tz
                 )
 
                 # Si no tiene pagos habilitados, crear pago automático al contado/efectivo
@@ -258,11 +265,10 @@ class CreateOperation(graphene.Mutation):
             else:
                 # Crear los pagos enviados desde el frontend
                 for payment_data in payments:
-                    # Parsear la fecha y convertirla a datetime con timezone
-                    payment_date = datetime.strptime(payment_data['payment_date'], '%Y-%m-%d').date()
-                    payment_datetime = timezone.make_aware(
-                        datetime.combine(payment_date, time.min)
-                    )
+                    # ✅ CORREGIDO: Parsear la fecha y convertirla a datetime con timezone de Perú
+                    naive_datetime = datetime.strptime(payment_data['payment_date'], '%Y-%m-%d %H:%M:%S')
+                    payment_datetime = timezone.make_aware(naive_datetime, timezone=peru_tz)
+
                     paid_amount = Decimal(str(payment_data['paid_amount']))
                     # Versión mejorada con validación de notes
                     notes = payment_data.get('notes', '')
@@ -307,8 +313,6 @@ class CreateOperation(graphene.Mutation):
                 success=False,
                 message=str(e)
             )
-
-
 # class CreateOperation(graphene.Mutation):
 #     class Arguments:
 #         document_id = graphene.ID()
@@ -334,7 +338,7 @@ class CreateOperation(graphene.Mutation):
 #         total_free = graphene.Float(default_value=0)
 #         total_amount = graphene.Float(required=True)
 #         items = graphene.List(OperationDetailInput, required=True)
-#         payments = graphene.List(PaymentInput, required=True)
+#         payments = graphene.List(PaymentInput, required=True)  # Nuevo campo
 #
 #     operation = graphene.Field(OperationType)
 #     success = graphene.Boolean()
@@ -343,28 +347,34 @@ class CreateOperation(graphene.Mutation):
 #     @transaction.atomic
 #     def mutate(self, info, **kwargs):
 #         try:
-#
 #             print('Operacion:', kwargs)
+#
+#             # Parsear fechas
 #             operation_date = datetime.strptime(kwargs['operation_date'], '%Y-%m-%d').date()
 #             emit_date = datetime.strptime(kwargs['emit_date'], '%Y-%m-%d').date()
 #             emit_time = datetime.strptime(kwargs['emit_time'], '%H:%M:%S').time()
+#
 #             operation_type = kwargs['operation_type']
 #             company_id = kwargs['company_id']
-#             document_id = kwargs['document_id']
+#             document_id = kwargs.get('document_id')
 #             serial = None
 #             next_number = None
+#
+#             # Lógica existente para serial y número
 #             if operation_type == "E":
-#                 serial = kwargs['serial']
-#                 next_number = kwargs['number']
+#                 serial = kwargs.get('serial', '')
+#                 next_number = kwargs.get('number', 0)
 #                 document_id = None
 #                 if serial == "" or next_number == 0:
 #                     serial = "E001"
 #                     next_number = generate_next_number(serial, company_id, operation_type)
 #             elif operation_type == "S":
-#                 # Obtener el siguiente número
 #                 serial_document = Serial.objects.get(id=kwargs['serial_id'])
 #                 serial = serial_document.serial
 #                 next_number = generate_next_number(serial, company_id, operation_type)
+#
+#             user_id = kwargs['user_id']
+#
 #             # Crear la operación
 #             operation = Operation.objects.create(
 #                 document_id=document_id,
@@ -376,7 +386,7 @@ class CreateOperation(graphene.Mutation):
 #                 emit_date=emit_date,
 #                 emit_time=emit_time,
 #                 person_id=kwargs.get('person_id'),
-#                 user_id=kwargs['user_id'],
+#                 user_id=user_id,
 #                 company_id=company_id,
 #                 currency=kwargs['currency'],
 #                 global_discount_percent=kwargs['global_discount_percent'],
@@ -391,28 +401,26 @@ class CreateOperation(graphene.Mutation):
 #                 total_amount=kwargs['total_amount']
 #             )
 #
-#             # Crear los detalles
+#             # Crear los detalles (código existente)
 #             for item in kwargs['items']:
 #                 product = Product.objects.get(id=item['product_id'])
 #
-#                 # Calcular valores del detalle
 #                 quantity = Decimal(str(item['quantity']))
 #                 unit_value = Decimal(str(item['unit_value']))
 #                 unit_price = Decimal(str(item['unit_price']))
-#                 discount_percentage = Decimal(str(item['discount_percentage']))
+#                 discount_percentage = Decimal(str(item.get('discount_percentage', 0)))
 #
 #                 total_value = quantity * unit_value
 #                 total_discount = total_value * (discount_percentage / 100)
 #                 total_value_after_discount = total_value - total_discount
 #
-#                 # Calcular IGV según tipo de afectación
 #                 type_affectation = TypeAffectation.objects.get(code=item['type_affectation_id'])
 #                 if type_affectation.code == 10:  # Gravada
 #                     total_igv = total_value_after_discount * (Decimal(str(kwargs['igv_percent'])) / 100)
 #                 else:
 #                     total_igv = Decimal('0')
 #
-#                 total_amount = total_value_after_discount + total_igv
+#                 total_amount_detail = total_value_after_discount + total_igv
 #
 #                 OperationDetail.objects.create(
 #                     operation=operation,
@@ -426,10 +434,10 @@ class CreateOperation(graphene.Mutation):
 #                     total_discount=total_discount,
 #                     total_value=total_value_after_discount,
 #                     total_igv=total_igv,
-#                     total_amount=total_amount
+#                     total_amount=total_amount_detail
 #                 )
 #
-#                 # Actualizar stock si es salida o entrada
+#                 # Actualizar stock
 #                 if operation_type == 'S':
 #                     product.stock -= quantity
 #                     product.save()
@@ -437,6 +445,79 @@ class CreateOperation(graphene.Mutation):
 #                     product.stock += quantity
 #                     product.purchase_price = unit_price
 #                     product.save()
+#             payment_type = 'I'
+#             notes_operation = "SIN ESPECIFICAR"
+#             if operation_type == 'S':
+#                 payment_type = 'I'
+#                 notes_operation = "SALIDA DE PRODUCTOS"
+#             elif operation_type == 'E':
+#                 payment_type = 'E'
+#                 notes_operation = "ENTRADA DE PRODUCTOS"
+#             # NUEVO: Crear los pagos
+#             payments = kwargs.get('payments', [])
+#             total_paid = Decimal('0')
+#
+#             # Si no hay pagos o is_payment está deshabilitado, crear pago automático
+#             if not payments:
+#                 # Usar emit_date con la hora actual (no time.min)
+#                 current_time = timezone.now().time()
+#                 payment_datetime = timezone.make_aware(
+#                     datetime.combine(emit_date, current_time)
+#                 )
+#
+#                 # Si no tiene pagos habilitados, crear pago automático al contado/efectivo
+#                 Payment.objects.create(
+#                     payment_type='CN',  # Contado
+#                     payment_method='E',  # Efectivo
+#                     status='C',  # Cancelado
+#                     type=payment_type,
+#                     notes=notes_operation,
+#                     user_id=user_id,
+#                     operation=operation,
+#                     company_id=company_id,
+#                     payment_date=payment_datetime,
+#                     total_amount=operation.total_amount,
+#                     paid_amount=operation.total_amount
+#                 )
+#                 total_paid = operation.total_amount
+#             else:
+#                 # Crear los pagos enviados desde el frontend
+#                 for payment_data in payments:
+#                     # Parsear la fecha y convertirla a datetime con timezone
+#                     # Ahora (fecha y hora completa)
+#                     payment_datetime = timezone.make_aware(
+#                         datetime.strptime(payment_data['payment_date'], '%Y-%m-%d %H:%M:%S')
+#                     )
+#                     paid_amount = Decimal(str(payment_data['paid_amount']))
+#                     # Versión mejorada con validación de notes
+#                     notes = payment_data.get('notes', '')
+#                     if not notes:  # Esto cubre None, '', '   ', etc.
+#                         notes = notes_operation
+#                     elif len(notes.strip()) <= 4:  # Si quieres descartar textos muy cortos
+#                         notes = f"{notes_operation} - {notes}"
+#
+#                     Payment.objects.create(
+#                         payment_type=payment_data['payment_type'],
+#                         payment_method=payment_data['payment_method'],
+#                         status=payment_data.get('status', 'C'),
+#                         type=payment_type,
+#                         notes=notes,
+#                         user_id=kwargs['user_id'],
+#                         operation=operation,
+#                         company_id=company_id,
+#                         payment_date=payment_datetime,  # Usar datetime con timezone
+#                         total_amount=operation.total_amount,
+#                         paid_amount=paid_amount
+#                     )
+#                     total_paid += paid_amount
+#
+#             # Convertir ambos valores a Decimal
+#             total_paid_decimal = Decimal(str(total_paid))
+#             operation_total_decimal = Decimal(str(operation.total_amount))
+#
+#             if abs(total_paid_decimal - operation_total_decimal) > Decimal('0.01'):
+#                 raise Exception(
+#                     f'El total pagado ({total_paid}) no coincide con el total de la operación ({operation.total_amount})')
 #
 #             return CreateOperation(
 #                 operation=operation,
