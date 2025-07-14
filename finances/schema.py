@@ -30,18 +30,35 @@ class FinancesQuery(graphene.ObjectType):
     @staticmethod
     def resolve_payments_by_date(self, info, company_id, date):
         try:
-            # Parsear la fecha
-            target_date = datetime.strptime(date, '%Y-%m-%d').date()
+            from django.utils import timezone
+            from datetime import timedelta
 
-            # Filtrar pagos por compañía y fecha
+            # 1. Depuración inicial
+            print(f"Buscando pagos para company_id={company_id}, date={date}")
+
+            # 2. Convertir fecha con manejo de zona horaria
+            naive_date = datetime.strptime(date, '%Y-%m-%d').date()
+            start_date = timezone.make_aware(datetime.combine(naive_date, datetime.min.time()))
+            end_date = start_date + timedelta(days=1)
+
+            # 3. Consulta con rango seguro
             payments = Payment.objects.filter(
                 company_id=company_id,
-                payment_date__date=target_date,
+                payment_date__gte=start_date,
+                payment_date__lt=end_date,
                 is_enabled=True
             ).select_related('user', 'company', 'operation').order_by('-payment_date')
 
+            # 4. Depuración de resultados
+            print(f"Pagos encontrados: {payments.count()}")
+            if payments.exists():
+                print("Ejemplo de pago encontrado:", payments.first().payment_date)
+
             return payments
+
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             raise Exception(f"Error al obtener pagos: {str(e)}")
 
     @staticmethod

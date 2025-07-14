@@ -5,12 +5,10 @@ from finances.models import Payment
 
 
 class PaymentType(DjangoObjectType):
-    id = graphene.Int()
 
     class Meta:
         model = Payment
         fields = "__all__"
-        interfaces = (graphene.relay.Node,)
 
 
 class PaymentInput(graphene.InputObjectType):
