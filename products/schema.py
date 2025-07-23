@@ -33,10 +33,30 @@ class ProductsQuery(graphene.ObjectType):
     def resolve_products_by_company_id(self, info, company_id=None):
         return Product.objects.filter(is_active=True, company_id=company_id).order_by('id')
 
+    @staticmethod
     def resolve_search_products(self, info, search, company_id, limit=20):
         """
         Búsqueda ultra eficiente tipo YouTube con tolerancia a errores
         """
+
+        # Función local para calcular similitud
+        def quick_similarity(search_term, text):
+            """Cálculo rápido de similitud (0-1)"""
+            if not text:
+                return 0
+
+            # Si contiene la búsqueda exacta
+            if search_term in text:
+                return 1.0
+
+            # Similitud por caracteres comunes
+            common = 0
+            for char in search_term:
+                if char in text:
+                    common += 1
+
+            return common / len(search_term) if search_term else 0
+
         search = search.strip().lower()
         if not search or len(search) < 2:
             return []
@@ -106,24 +126,32 @@ class ProductsQuery(graphene.ObjectType):
         # Solo si necesitamos refinar resultados
         scored_products = []
         for product in products:
-            # Calcular similitud con la búsqueda
-            desc_lower = product.description.lower() if product.description else ""
-            code_lower = product.code.lower() if product.code else ""
+            try:
+                # Calcular similitud con la búsqueda
+                desc_lower = product.description.lower() if product.description else ""
+                code_lower = product.code.lower() if product.code else ""
 
-            # Similitud básica rápida
-            desc_similarity = self._quick_similarity(search, desc_lower)
-            code_similarity = self._quick_similarity(search, code_lower)
+                # Similitud básica rápida - ASEGÚRATE DE PASAR AMBOS ARGUMENTOS
+                desc_similarity = quick_similarity(search, desc_lower)
+                code_similarity = quick_similarity(search, code_lower)
 
-            # Bonus si contiene todas las palabras en orden
-            order_bonus = 10 if all(word in desc_lower for word in words) else 0
+                # Bonus si contiene todas las palabras en orden
+                order_bonus = 10 if all(word in desc_lower for word in words) else 0
 
-            # Score final
-            final_score = product.relevance_score + (max(desc_similarity, code_similarity) * 20) + order_bonus
+                # Score final
+                final_score = product.relevance_score + (max(desc_similarity, code_similarity) * 20) + order_bonus
 
-            scored_products.append({
-                'product': product,
-                'score': final_score
-            })
+                scored_products.append({
+                    'product': product,
+                    'score': final_score
+                })
+            except Exception as e:
+                print(f"Error procesando producto {product.id}: {e}")
+                # Incluir el producto con su score original si hay error
+                scored_products.append({
+                    'product': product,
+                    'score': product.relevance_score
+                })
 
         # Ordenar por score final y tomar los mejores
         scored_products.sort(key=lambda x: x['score'], reverse=True)
@@ -134,24 +162,6 @@ class ProductsQuery(graphene.ObjectType):
             product.relevance_score = scored_products[i]['score']
 
         return final_results
-
-    @staticmethod
-    def _quick_similarity(self, search, text):
-        """Cálculo rápido de similitud (0-1)"""
-        if not text:
-            return 0
-
-        # Si contiene la búsqueda exacta
-        if search in text:
-            return 1.0
-
-        # Similitud por caracteres comunes (más rápido que SequenceMatcher)
-        common = 0
-        for char in search:
-            if char in text:
-                common += 1
-
-        return common / len(search) if search else 0
 
     @staticmethod
     def resolve_product_by_id(self, info, id, company_id):
