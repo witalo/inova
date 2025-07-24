@@ -160,3 +160,63 @@ class DailySummaryType(graphene.ObjectType):
     purchases_count = graphene.Int()
     balance = graphene.Float()
     average_ticket = graphene.Float()
+
+
+# Types
+class DailyReportsType(graphene.ObjectType):
+    date = graphene.String()
+    entries = graphene.Int()
+    entries_amount = graphene.Float()
+    sales = graphene.Int()
+    sales_amount = graphene.Float()
+    profit = graphene.Float()
+    transaction_count = graphene.Int()
+
+
+class ProductReportType(graphene.ObjectType):
+    product_id = graphene.ID()
+    product_name = graphene.String()
+    product_code = graphene.String()
+    quantity_sold = graphene.Float()
+    quantity_purchased = graphene.Float()
+    total_sales = graphene.Float()
+    total_purchases = graphene.Float()
+    profit = graphene.Float()
+    stock_movement = graphene.Float()
+
+
+class StatsType(graphene.ObjectType):
+    total_entries = graphene.Int()
+    total_entries_amount = graphene.Float()
+    total_sales = graphene.Int()
+    total_sales_amount = graphene.Float()
+    total_profit = graphene.Float()
+    avg_daily_sales = graphene.Float()
+    avg_daily_entries = graphene.Float()
+    growth_rate = graphene.Float()
+
+
+class PaymentMethodType(graphene.ObjectType):
+    method = graphene.String()
+    method_name = graphene.String()
+    count = graphene.Int()
+    amount = graphene.Float()
+    percentage = graphene.Float()
+
+
+class TopCustomerType(graphene.ObjectType):
+    customer_id = graphene.ID()
+    customer_name = graphene.String()
+    customer_document = graphene.String()
+    purchase_count = graphene.Int()
+    total_amount = graphene.Float()
+    avg_ticket = graphene.Float()
+    last_purchase = graphene.String()
+
+
+class MonthlyReportsType(graphene.ObjectType):
+    daily_reports = graphene.List(DailyReportsType)
+    product_reports = graphene.List(ProductReportType)
+    stats = graphene.Field(StatsType)
+    payment_methods = graphene.List(PaymentMethodType)
+    top_customers = graphene.List(TopCustomerType)

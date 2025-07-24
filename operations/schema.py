@@ -5,6 +5,7 @@ import logging
 
 from django.db.models.functions import Extract
 
+from finances.models import Payment
 from operations import models
 from operations.apis import ApisNetPe
 from operations.models import Person
@@ -15,7 +16,11 @@ from datetime import datetime, timedelta, date
 from django.db.models import Sum, Value, Count, Q, F, Avg, When, Case, IntegerField
 from django.utils import timezone
 import requests
-
+import graphene
+from datetime import datetime, timedelta
+from django.db.models import Sum, Count, Avg, F, Q, Max
+from django.db.models.functions import TruncDate
+import calendar
 # Configurar logger
 logger = logging.getLogger(__name__)
 
@@ -95,6 +100,13 @@ class OperationsQuery(graphene.ObjectType):
         DailySummaryType,
         company_id=graphene.Int(required=True),
         date=graphene.String(required=False)
+    )
+
+    monthly_reports = graphene.Field(
+        MonthlyReportsType,
+        company_id=graphene.ID(required=True),
+        year=graphene.Int(required=True),
+        month=graphene.Int(required=True)
     )
 
     @staticmethod
@@ -839,6 +851,230 @@ class OperationsQuery(graphene.ObjectType):
             balance=total_sales - total_purchases,
             average_ticket=float(summary['average_ticket'] or 0)
         )
+
+    @staticmethod
+    def resolve_monthly_reports(self, info, company_id, year, month):
+        # Calcular primer y último día del mes
+        first_day = datetime(year, month, 1)
+        last_day = datetime(year, month, calendar.monthrange(year, month)[1])
+
+        # Filtrar operaciones del mes que NO estén anuladas
+        operations = Operation.objects.filter(
+            company_id=company_id,
+            operation_date__gte=first_day,
+            operation_date__lte=last_day
+        ).exclude(
+            operation_status__in=['5', 'A_5']  # Excluir anuladas
+        )
+
+        # 1. DAILY REPORTS
+        daily_data = operations.annotate(
+            date_only=TruncDate('operation_date')
+        ).values('date_only', 'operation_type').annotate(
+            count=Count('id'),
+            total=Sum('total_amount')
+        ).order_by('date_only')
+
+        # Organizar por fecha
+        daily_dict = {}
+        for item in daily_data:
+            date_str = item['date_only'].strftime('%Y-%m-%d')
+            if date_str not in daily_dict:
+                daily_dict[date_str] = {
+                    'date': date_str,
+                    'entries': 0,
+                    'entries_amount': 0,
+                    'sales': 0,
+                    'sales_amount': 0,
+                    'profit': 0,
+                    'transaction_count': 0
+                }
+
+            if item['operation_type'] == 'E':  # Entrada
+                daily_dict[date_str]['entries'] = item['count']
+                daily_dict[date_str]['entries_amount'] = float(item['total'] or 0)
+            else:  # Salida
+                daily_dict[date_str]['sales'] = item['count']
+                daily_dict[date_str]['sales_amount'] = float(item['total'] or 0)
+
+            daily_dict[date_str]['transaction_count'] += item['count']
+            daily_dict[date_str]['profit'] = (
+                    daily_dict[date_str]['sales_amount'] -
+                    daily_dict[date_str]['entries_amount']
+            )
+
+        daily_reports = list(daily_dict.values())
+
+        # 2. PRODUCT REPORTS
+        # Obtener detalles de operaciones
+        details = OperationDetail.objects.filter(
+            operation__in=operations
+        ).values(
+            'product_id',
+            'product__description',
+            'product__code',
+            'operation__operation_type'
+        ).annotate(
+            quantity=Sum('quantity'),
+            total=Sum('total_amount')
+        )
+
+        # Organizar por producto
+        product_dict = {}
+        for detail in details:
+            product_id = detail['product_id']
+            if product_id not in product_dict:
+                product_dict[product_id] = {
+                    'product_id': product_id,
+                    'product_name': detail['product__description'],
+                    'product_code': detail['product__code'],
+                    'quantity_sold': 0,
+                    'quantity_purchased': 0,
+                    'total_sales': 0,
+                    'total_purchases': 0,
+                    'profit': 0,
+                    'stock_movement': 0
+                }
+
+            if detail['operation__operation_type'] == 'E':  # Entrada
+                product_dict[product_id]['quantity_purchased'] = float(detail['quantity'] or 0)
+                product_dict[product_id]['total_purchases'] = float(detail['total'] or 0)
+            else:  # Salida
+                product_dict[product_id]['quantity_sold'] = float(detail['quantity'] or 0)
+                product_dict[product_id]['total_sales'] = float(detail['total'] or 0)
+
+            product_dict[product_id]['profit'] = (
+                    product_dict[product_id]['total_sales'] -
+                    product_dict[product_id]['total_purchases']
+            )
+            product_dict[product_id]['stock_movement'] = (
+                    product_dict[product_id]['quantity_purchased'] -
+                    product_dict[product_id]['quantity_sold']
+            )
+
+        product_reports = list(product_dict.values())
+
+        # 3. STATS
+        total_sales = operations.filter(operation_type='S').aggregate(
+            count=Count('id'),
+            total=Sum('total_amount')
+        )
+        total_entries = operations.filter(operation_type='E').aggregate(
+            count=Count('id'),
+            total=Sum('total_amount')
+        )
+
+        days_in_month = calendar.monthrange(year, month)[1]
+        total_sales_amount = float(total_sales['total'] or 0)
+        total_entries_amount = float(total_entries['total'] or 0)
+
+        # Calcular growth rate (comparar con mes anterior)
+        if month == 1:
+            prev_month = 12
+            prev_year = year - 1
+        else:
+            prev_month = month - 1
+            prev_year = year
+
+        prev_first_day = datetime(prev_year, prev_month, 1)
+        prev_last_day = datetime(prev_year, prev_month, calendar.monthrange(prev_year, prev_month)[1])
+
+        prev_sales = Operation.objects.filter(
+            company_id=company_id,
+            operation_type='S',
+            operation_date__gte=prev_first_day,
+            operation_date__lte=prev_last_day
+        ).exclude(
+            operation_status__in=['5', 'A_5']
+        ).aggregate(total=Sum('total_amount'))
+
+        prev_total = float(prev_sales['total'] or 0)
+        growth_rate = 0
+        if prev_total > 0:
+            growth_rate = ((total_sales_amount - prev_total) / prev_total) * 100
+
+        stats = {
+            'total_entries': total_entries['count'] or 0,
+            'total_entries_amount': total_entries_amount,
+            'total_sales': total_sales['count'] or 0,
+            'total_sales_amount': total_sales_amount,
+            'total_profit': total_sales_amount - total_entries_amount,
+            'avg_daily_sales': total_sales_amount / days_in_month,
+            'avg_daily_entries': total_entries_amount / days_in_month,
+            'growth_rate': growth_rate
+        }
+
+        # 4. PAYMENT METHODS
+        if hasattr(Operation, 'paymentset') or hasattr(Operation, 'payment_set'):
+            payments = Payment.objects.filter(
+                operation__in=operations.filter(operation_type='S')
+            ).values('payment_method').annotate(
+                count=Count('id'),
+                total=Sum('paid_amount')
+            )
+
+            payment_methods = []
+            total_payments = sum(p['total'] for p in payments)
+
+            method_names = {
+                'E': 'Efectivo',
+                'Y': 'Yape',
+                'P': 'Plin',
+                'T': 'Tarjeta',
+                'B': 'Transferencia'
+            }
+
+            for payment in payments:
+                percentage = 0
+                if total_payments > 0:
+                    percentage = (float(payment['total']) / total_payments) * 100
+
+                payment_methods.append({
+                    'method': payment['payment_method'],
+                    'method_name': method_names.get(payment['payment_method'], payment['payment_method']),
+                    'count': payment['count'],
+                    'amount': float(payment['total']),
+                    'percentage': percentage
+                })
+        else:
+            payment_methods = []
+
+        # 5. TOP CUSTOMERS
+        customers = operations.filter(
+            operation_type='S'
+        ).exclude(
+            person__isnull=True
+        ).values(
+            'person_id',
+            'person__full_name',
+            'person__document'
+        ).annotate(
+            count=Count('id'),
+            total=Sum('total_amount'),
+            avg=Avg('total_amount'),
+            last_date=Max('operation_date')
+        ).order_by('-total')[:10]
+
+        top_customers = []
+        for customer in customers:
+            top_customers.append({
+                'customer_id': customer['person_id'],
+                'customer_name': customer['person__full_name'],
+                'customer_document': customer['person__document'],
+                'purchase_count': customer['count'],
+                'total_amount': float(customer['total']),
+                'avg_ticket': float(customer['avg']),
+                # 'last_purchase': customer['last_date'].strftime('%Y-%m-%d')
+                'last_purchase': customer['last_date'].strftime('%Y-%m-%d') if customer['last_date'] else None
+            })
+
+        return {
+            'daily_reports': daily_reports,
+            'product_reports': product_reports,
+            'stats': stats,
+            'payment_methods': payment_methods,
+            'top_customers': top_customers
+        }
 
 
 class OperationsMutation(graphene.ObjectType):
