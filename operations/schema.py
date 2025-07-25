@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from django.db.models import Sum, Count, Avg, F, Q, Max
 from django.db.models.functions import TruncDate
 import calendar
+
 # Configurar logger
 logger = logging.getLogger(__name__)
 
@@ -878,6 +879,10 @@ class OperationsQuery(graphene.ObjectType):
         # Organizar por fecha
         daily_dict = {}
         for item in daily_data:
+            # Verificar que date_only no sea None
+            if item['date_only'] is None:
+                continue
+
             date_str = item['date_only'].strftime('%Y-%m-%d')
             if date_str not in daily_dict:
                 daily_dict[date_str] = {
@@ -925,9 +930,9 @@ class OperationsQuery(graphene.ObjectType):
             product_id = detail['product_id']
             if product_id not in product_dict:
                 product_dict[product_id] = {
-                    'product_id': product_id,
-                    'product_name': detail['product__description'],
-                    'product_code': detail['product__code'],
+                    'product_id': str(product_id),  # Convertir a string
+                    'product_name': detail['product__description'] or 'Sin nombre',
+                    'product_code': detail['product__code'] or 'Sin código',
                     'quantity_sold': 0,
                     'quantity_purchased': 0,
                     'total_sales': 0,
@@ -999,74 +1004,96 @@ class OperationsQuery(graphene.ObjectType):
             'total_sales': total_sales['count'] or 0,
             'total_sales_amount': total_sales_amount,
             'total_profit': total_sales_amount - total_entries_amount,
-            'avg_daily_sales': total_sales_amount / days_in_month,
-            'avg_daily_entries': total_entries_amount / days_in_month,
+            'avg_daily_sales': total_sales_amount / days_in_month if days_in_month > 0 else 0,
+            'avg_daily_entries': total_entries_amount / days_in_month if days_in_month > 0 else 0,
             'growth_rate': growth_rate
         }
 
         # 4. PAYMENT METHODS
-        if hasattr(Operation, 'paymentset') or hasattr(Operation, 'payment_set'):
-            payments = Payment.objects.filter(
-                operation__in=operations.filter(operation_type='S')
-            ).values('payment_method').annotate(
-                count=Count('id'),
-                total=Sum('paid_amount')
-            )
+        payment_methods = []
+        try:
+            # Verificar si existe el modelo Payment
+            if hasattr(Operation, 'payment_set') or hasattr(Operation, 'payments'):
+                from operations.models import Payment  # Asegurarse de importar el modelo
 
-            payment_methods = []
-            total_payments = sum(p['total'] for p in payments)
+                payments = Payment.objects.filter(
+                    operation__in=operations.filter(operation_type='S')
+                ).values('payment_method').annotate(
+                    count=Count('id'),
+                    total=Sum('paid_amount')
+                )
 
-            method_names = {
-                'E': 'Efectivo',
-                'Y': 'Yape',
-                'P': 'Plin',
-                'T': 'Tarjeta',
-                'B': 'Transferencia'
-            }
+                total_payments = sum(float(p['total'] or 0) for p in payments)
 
-            for payment in payments:
-                percentage = 0
-                if total_payments > 0:
-                    percentage = (float(payment['total']) / total_payments) * 100
+                method_names = {
+                    'E': 'Efectivo',
+                    'Y': 'Yape',
+                    'P': 'Plin',
+                    'T': 'Tarjeta',
+                    'B': 'Transferencia'
+                }
 
-                payment_methods.append({
-                    'method': payment['payment_method'],
-                    'method_name': method_names.get(payment['payment_method'], payment['payment_method']),
-                    'count': payment['count'],
-                    'amount': float(payment['total']),
-                    'percentage': percentage
-                })
-        else:
+                for payment in payments:
+                    percentage = 0
+                    if total_payments > 0:
+                        percentage = (float(payment['total'] or 0) / total_payments) * 100
+
+                    payment_methods.append({
+                        'method': payment['payment_method'],
+                        'method_name': method_names.get(payment['payment_method'], payment['payment_method']),
+                        'count': payment['count'],
+                        'amount': float(payment['total'] or 0),
+                        'percentage': percentage
+                    })
+        except Exception as e:
+            # Si hay algún error con los pagos, continuar sin ellos
+            print(f"Error obteniendo métodos de pago: {e}")
             payment_methods = []
 
         # 5. TOP CUSTOMERS
-        customers = operations.filter(
-            operation_type='S'
-        ).exclude(
-            person__isnull=True
-        ).values(
-            'person_id',
-            'person__full_name',
-            'person__document'
-        ).annotate(
-            count=Count('id'),
-            total=Sum('total_amount'),
-            avg=Avg('total_amount'),
-            last_date=Max('operation_date')
-        ).order_by('-total')[:10]
-
         top_customers = []
-        for customer in customers:
-            top_customers.append({
-                'customer_id': customer['person_id'],
-                'customer_name': customer['person__full_name'],
-                'customer_document': customer['person__document'],
-                'purchase_count': customer['count'],
-                'total_amount': float(customer['total']),
-                'avg_ticket': float(customer['avg']),
-                # 'last_purchase': customer['last_date'].strftime('%Y-%m-%d')
-                'last_purchase': customer['last_date'].strftime('%Y-%m-%d') if customer['last_date'] else None
-            })
+        try:
+            customers = operations.filter(
+                operation_type='S'
+            ).exclude(
+                person__isnull=True
+            ).values(
+                'person_id',
+                'person__full_name',
+                'person__document'
+            ).annotate(
+                count=Count('id'),
+                total=Sum('total_amount'),
+                avg=Avg('total_amount'),
+                last_date=Max('operation_date')
+            ).order_by('-total')[:10]
+
+            for customer in customers:
+                # Manejar correctamente las fechas nulas y otros campos
+                last_purchase_date = None
+                if customer.get('last_date'):
+                    try:
+                        last_purchase_date = customer['last_date'].strftime('%Y-%m-%d')
+                    except AttributeError:
+                        # Si last_date no es un objeto datetime
+                        last_purchase_date = None
+
+                # Asegurarse de que person_id sea string
+                customer_id = str(customer['person_id']) if customer['person_id'] else None
+
+                top_customers.append({
+                    'customer_id': customer_id,
+                    'customer_name': customer['person__full_name'] or 'Sin nombre',
+                    'customer_document': customer['person__document'] or 'Sin documento',
+                    'purchase_count': customer['count'] or 0,
+                    'total_amount': float(customer['total'] or 0),
+                    'avg_ticket': float(customer['avg'] or 0),
+                    'last_purchase': last_purchase_date
+                })
+        except Exception as e:
+            # Si hay algún error con los clientes, continuar sin ellos
+            print(f"Error obteniendo top clientes: {e}")
+            top_customers = []
 
         return {
             'daily_reports': daily_reports,
