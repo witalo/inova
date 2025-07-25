@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from django.db.models import Sum, Count, Avg, F, Q, Max
 from django.db.models.functions import TruncDate
 import calendar
+import pytz
 
 # Configurar logger
 logger = logging.getLogger(__name__)
@@ -855,35 +856,45 @@ class OperationsQuery(graphene.ObjectType):
 
     @staticmethod
     def resolve_monthly_reports(self, info, company_id, year, month):
+        # Configurar la zona horaria de Perú
+        lima_tz = pytz.timezone('America/Lima')
+        # Calcular primer y último día del mes en la zona horaria de Lima
+        first_day = lima_tz.localize(datetime(year, month, 1))
+        last_day = lima_tz.localize(datetime(year, month, calendar.monthrange(year, month)[1], 23, 59, 59))
         # Calcular primer y último día del mes
-        first_day = datetime(year, month, 1)
-        last_day = datetime(year, month, calendar.monthrange(year, month)[1])
+        # first_day = datetime(year, month, 1)
+        # last_day = datetime(year, month, calendar.monthrange(year, month)[1])
 
         # Filtrar operaciones del mes que NO estén anuladas
         operations = Operation.objects.filter(
             company_id=company_id,
-            operation_date__gte=first_day,
-            operation_date__lte=last_day
+            emit_date__gte=first_day,
+            emit_date__lte=last_day
         ).exclude(
-            operation_status__in=['5', 'A_5']  # Excluir anuladas
+            operation_status__in=['3', '4', '5', '6']  # Excluir anuladas
         )
 
         # 1. DAILY REPORTS
-        daily_data = operations.annotate(
-            date_only=TruncDate('operation_date')
-        ).values('date_only', 'operation_type').annotate(
-            count=Count('id'),
-            total=Sum('total_amount')
-        ).order_by('date_only')
+        # Método alternativo sin TruncDate y con manejo de zona horaria
+        from django.utils import timezone
 
-        # Organizar por fecha
         daily_dict = {}
-        for item in daily_data:
-            # Verificar que date_only no sea None
-            if item['date_only'] is None:
+        for operation in operations:
+            if operation.emit_date is None:
                 continue
+            # Convertir la fecha a la zona horaria de Lima
+            # lima_date = timezone.localtime(operation.emit_date, timezone=lima_tz).date()
+            date_str = operation.emit_date.strftime('%Y-%m-%d')
+            # Si emit_date es DateTimeField, convertir a la zona horaria local
+            # Si es DateField, usar directamente
+            # if hasattr(operation.emit_date, 'astimezone'):
+            #     # Es DateTimeField - convertir a zona horaria local
+            #     local_date = timezone.localtime(operation.emit_date).date()
+            #     date_str = local_date.strftime('%Y-%m-%d')
+            # else:
+            #     # Es DateField - usar directamente
+            #     date_str = operation.emit_date.strftime('%Y-%m-%d')
 
-            date_str = item['date_only'].strftime('%Y-%m-%d')
             if date_str not in daily_dict:
                 daily_dict[date_str] = {
                     'date': date_str,
@@ -895,20 +906,21 @@ class OperationsQuery(graphene.ObjectType):
                     'transaction_count': 0
                 }
 
-            if item['operation_type'] == 'E':  # Entrada
-                daily_dict[date_str]['entries'] = item['count']
-                daily_dict[date_str]['entries_amount'] = float(item['total'] or 0)
+            if operation.operation_type == 'E':  # Entrada
+                daily_dict[date_str]['entries'] += 1
+                daily_dict[date_str]['entries_amount'] += float(operation.total_amount or 0)
             else:  # Salida
-                daily_dict[date_str]['sales'] = item['count']
-                daily_dict[date_str]['sales_amount'] = float(item['total'] or 0)
+                daily_dict[date_str]['sales'] += 1
+                daily_dict[date_str]['sales_amount'] += float(operation.total_amount or 0)
 
-            daily_dict[date_str]['transaction_count'] += item['count']
+            daily_dict[date_str]['transaction_count'] += 1
             daily_dict[date_str]['profit'] = (
                     daily_dict[date_str]['sales_amount'] -
                     daily_dict[date_str]['entries_amount']
             )
 
-        daily_reports = list(daily_dict.values())
+        # Ordenar por fecha
+        daily_reports = sorted(list(daily_dict.values()), key=lambda x: x['date'])
 
         # 2. PRODUCT REPORTS
         # Obtener detalles de operaciones
@@ -987,10 +999,10 @@ class OperationsQuery(graphene.ObjectType):
         prev_sales = Operation.objects.filter(
             company_id=company_id,
             operation_type='S',
-            operation_date__gte=prev_first_day,
-            operation_date__lte=prev_last_day
+            emit_date__gte=prev_first_day,  # CAMBIADO A emit_date
+            emit_date__lte=prev_last_day  # CAMBIADO A emit_date
         ).exclude(
-            operation_status__in=['5', 'A_5']
+            operation_status__in=['3', '4', '5', '6']  # Usar mismos estados excluidos
         ).aggregate(total=Sum('total_amount'))
 
         prev_total = float(prev_sales['total'] or 0)
@@ -1012,43 +1024,49 @@ class OperationsQuery(graphene.ObjectType):
         # 4. PAYMENT METHODS
         payment_methods = []
         try:
-            # Verificar si existe el modelo Payment
-            if hasattr(Operation, 'payment_set') or hasattr(Operation, 'payments'):
-                from operations.models import Payment  # Asegurarse de importar el modelo
+            # Filtrar pagos de las operaciones de venta (S) del mes
+            payments = Payment.objects.filter(
+                operation__in=operations.filter(operation_type='S'),
+                status='C',  # Solo pagos cancelados (completados)
+                type='I',  # Solo ingresos (pagos recibidos)
+                is_enabled=True  # Solo pagos habilitados
+            ).values('payment_method').annotate(
+                count=Count('id'),
+                total=Sum('paid_amount')
+            ).order_by('-total')  # Ordenar por monto descendente
 
-                payments = Payment.objects.filter(
-                    operation__in=operations.filter(operation_type='S')
-                ).values('payment_method').annotate(
-                    count=Count('id'),
-                    total=Sum('paid_amount')
-                )
+            total_payments = sum(float(p['total'] or 0) for p in payments)
 
-                total_payments = sum(float(p['total'] or 0) for p in payments)
+            # Mapeo de métodos de pago según tu modelo
+            method_names = {
+                'E': 'Efectivo',
+                'Y': 'Yape',
+                'P': 'Plin',
+                'T': 'Tarjeta',
+                'B': 'Transferencia'
+            }
 
-                method_names = {
-                    'E': 'Efectivo',
-                    'Y': 'Yape',
-                    'P': 'Plin',
-                    'T': 'Tarjeta',
-                    'B': 'Transferencia'
-                }
+            for payment in payments:
+                amount = float(payment['total'] or 0)
+                percentage = (amount / total_payments * 100) if total_payments > 0 else 0
 
-                for payment in payments:
-                    percentage = 0
-                    if total_payments > 0:
-                        percentage = (float(payment['total'] or 0) / total_payments) * 100
+                payment_methods.append({
+                    'method': payment['payment_method'],
+                    'method_name': method_names.get(
+                        payment['payment_method'],
+                        payment['payment_method']  # Valor por defecto si no está en el mapeo
+                    ),
+                    'count': payment['count'],
+                    'amount': amount,
+                    'percentage': round(percentage, 2)  # Redondear a 2 decimales
+                })
 
-                    payment_methods.append({
-                        'method': payment['payment_method'],
-                        'method_name': method_names.get(payment['payment_method'], payment['payment_method']),
-                        'count': payment['count'],
-                        'amount': float(payment['total'] or 0),
-                        'percentage': percentage
-                    })
+            # Ordenar por cantidad (opcional)
+            payment_methods.sort(key=lambda x: x['amount'], reverse=True)
+
         except Exception as e:
-            # Si hay algún error con los pagos, continuar sin ellos
-            print(f"Error obteniendo métodos de pago: {e}")
-            payment_methods = []
+            print(f"Error obteniendo métodos de pago: {str(e)}")
+            payment_methods = []  # Retornar lista vacía en caso de error
 
         # 5. TOP CUSTOMERS
         top_customers = []
@@ -1065,7 +1083,7 @@ class OperationsQuery(graphene.ObjectType):
                 count=Count('id'),
                 total=Sum('total_amount'),
                 avg=Avg('total_amount'),
-                last_date=Max('operation_date')
+                last_date=Max('emit_date')  # CAMBIADO A emit_date
             ).order_by('-total')[:10]
 
             for customer in customers:
