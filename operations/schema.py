@@ -1,4 +1,6 @@
 import re
+from decimal import Decimal
+
 import graphene
 from django.db import transaction
 import logging
@@ -1015,7 +1017,7 @@ class OperationsQuery(graphene.ObjectType):
         print(f"DEBUG: Operaciones encontradas mes anterior: {prev_sales.count()}")
 
         prev_sales_aggregate = prev_sales.aggregate(
-            total=Coalesce(Sum('total_amount'), Value(0))
+            total=Coalesce(Sum('total_amount'), Decimal('0'))
         )
         prev_total = float(prev_sales_aggregate['total'] or 0)
 
