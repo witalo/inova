@@ -3,7 +3,7 @@ import graphene
 from django.db import transaction
 import logging
 
-from django.db.models.functions import Extract
+from django.db.models.functions import Extract, Coalesce
 
 from finances.models import Payment
 from operations import models
@@ -993,22 +993,41 @@ class OperationsQuery(graphene.ObjectType):
             prev_month = month - 1
             prev_year = year
 
-        prev_first_day = datetime(prev_year, prev_month, 1)
-        prev_last_day = datetime(prev_year, prev_month, calendar.monthrange(prev_year, prev_month)[1])
+        # Usar date en lugar de datetime ya que emit_date es DateField
+        from datetime import date
+
+        prev_first_day = date(prev_year, prev_month, 1)
+        prev_last_day = date(prev_year, prev_month, calendar.monthrange(prev_year, prev_month)[1])
+
+        # Debug para verificar las fechas
+        print(f"DEBUG: Buscando ventas anteriores desde {prev_first_day} hasta {prev_last_day}")
 
         prev_sales = Operation.objects.filter(
             company_id=company_id,
             operation_type='S',
-            emit_date__gte=prev_first_day,  # CAMBIADO A emit_date
-            emit_date__lte=prev_last_day  # CAMBIADO A emit_date
+            emit_date__gte=prev_first_day,
+            emit_date__lte=prev_last_day
         ).exclude(
-            operation_status__in=['3', '4', '5', '6']  # Usar mismos estados excluidos
-        ).aggregate(total=Sum('total_amount'))
+            operation_status__in=['3', '4', '5', '6']
+        )
 
-        prev_total = float(prev_sales['total'] or 0)
+        # Debug para ver cuántas operaciones encuentra
+        print(f"DEBUG: Operaciones encontradas mes anterior: {prev_sales.count()}")
+
+        prev_sales_aggregate = prev_sales.aggregate(
+            total=Coalesce(Sum('total_amount'), Value(0))
+        )
+        prev_total = float(prev_sales_aggregate['total'] or 0)
+
         growth_rate = 0
+        print(f"DEBUG Growth: Mes actual ({month}/{year}) ventas: {total_sales_amount}")
+        print(f"DEBUG Growth: Mes anterior ({prev_month}/{prev_year}) ventas: {prev_total}")
+
         if prev_total > 0:
             growth_rate = ((total_sales_amount - prev_total) / prev_total) * 100
+            print(f"DEBUG Growth: Tasa de crecimiento calculada: {growth_rate:.2f}%")
+        else:
+            print("DEBUG Growth: No hay ventas en el mes anterior o total es 0")
 
         stats = {
             'total_entries': total_entries['count'] or 0,
