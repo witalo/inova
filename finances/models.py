@@ -1,6 +1,7 @@
 from django.db import models
 from django.utils import timezone
 
+
 class Payment(models.Model):
     # Tipos de pago
     PAYMENT_TYPES = [

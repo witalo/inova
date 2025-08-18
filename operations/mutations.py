@@ -1,22 +1,23 @@
 import os
 import re
-from datetime import date
-from decimal import Decimal
-from datetime import datetime
-import graphene
-from django.db import transaction
-from django.utils import timezone
 from datetime import datetime, date, time
 from finances.models import Payment
 from finances.types import PaymentInput
+from inova import settings
 from operations.models import Person, Serial, Operation, OperationDetail
 from operations.types import PersonInput, PersonType, OperationDetailInput, OperationType
-from operations.views import generate_next_number
+from operations.views import generate_next_number, get_peru_date
 from products.models import Product, TypeAffectation
 from django.utils import timezone
+import graphene
+from django.db import transaction
+from decimal import Decimal
 import pytz
+import logging
+# Configurar logger
+from users.models import Company, User
 
-# Definir la zona horaria de Perú
+logger = logging.getLogger('operations.tasks')
 peru_tz = pytz.timezone('America/Lima')
 
 
@@ -94,489 +95,107 @@ class PersonMutation(graphene.Mutation):
             )
 
 
-class CreateOperation(graphene.Mutation):
-    class Arguments:
-        document_id = graphene.ID()
-        serial_id = graphene.ID()
-        operation_type = graphene.String(required=True)
-        operation_date = graphene.String(required=True)
-        serial = graphene.String()
-        number = graphene.Int()
-        emit_date = graphene.String(required=True)
-        emit_time = graphene.String(required=True)
-        person_id = graphene.ID()
-        user_id = graphene.ID(required=True)
-        company_id = graphene.ID(required=True)
-        currency = graphene.String(default_value='PEN')
-        global_discount_percent = graphene.Float(default_value=0)
-        global_discount = graphene.Float(default_value=0)
-        total_discount = graphene.Float(default_value=0)
-        igv_percent = graphene.Float(default_value=18)
-        igv_amount = graphene.Float(required=True)
-        total_taxable = graphene.Float(default_value=0)
-        total_unaffected = graphene.Float(default_value=0)
-        total_exempt = graphene.Float(default_value=0)
-        total_free = graphene.Float(default_value=0)
-        total_amount = graphene.Float(required=True)
-        items = graphene.List(OperationDetailInput, required=True)
-        payments = graphene.List(PaymentInput, required=True)  # Nuevo campo
 
-    operation = graphene.Field(OperationType)
+
+class CheckTaskStatus(graphene.Mutation):
+    """Mutación para verificar el estado de una tarea de Celery"""
+
+    class Arguments:
+        task_id = graphene.String(required=True)
+
     success = graphene.Boolean()
+    status = graphene.String()
+    result = graphene.String()
     message = graphene.String()
 
-    @transaction.atomic
-    def mutate(self, info, **kwargs):
+    def mutate(self, info, task_id):
         try:
-            print('Operacion:', kwargs)
+            from celery.result import AsyncResult
 
-            # Parsear fechas
-            operation_date = datetime.strptime(kwargs['operation_date'], '%Y-%m-%d').date()
-            emit_date = datetime.strptime(kwargs['emit_date'], '%Y-%m-%d').date()
-            emit_time = datetime.strptime(kwargs['emit_time'], '%H:%M:%S').time()
+            result = AsyncResult(task_id)
 
-            operation_type = kwargs['operation_type']
-            company_id = kwargs['company_id']
-            document_id = kwargs.get('document_id')
-            serial = None
-            next_number = None
+            status_map = {
+                'PENDING': 'Pendiente',
+                'STARTED': 'Iniciado',
+                'RETRY': 'Reintentando',
+                'SUCCESS': 'Completado',
+                'FAILURE': 'Error'
+            }
 
-            # Lógica existente para serial y número
-            if operation_type == "E":
-                serial = kwargs.get('serial', '')
-                next_number = kwargs.get('number', 0)
-                document_id = None
-                if serial == "" or next_number == 0:
-                    serial = "E001"
-                    next_number = generate_next_number(serial, company_id, operation_type)
-            elif operation_type == "S":
-                serial_document = Serial.objects.get(id=kwargs['serial_id'])
-                serial = serial_document.serial
-                next_number = generate_next_number(serial, company_id, operation_type)
+            status = status_map.get(result.state, result.state)
 
-            user_id = kwargs['user_id']
+            # Obtener resultado si está disponible
+            task_result = None
+            if result.ready():
+                try:
+                    task_result = str(result.result)
+                except:
+                    task_result = 'Resultado no disponible'
 
-            # Crear la operación
-            operation = Operation.objects.create(
-                document_id=document_id,
-                serial=serial,
-                number=next_number,
-                operation_type=operation_type,
-                operation_status='1',  # Registrado
-                operation_date=operation_date,
-                emit_date=emit_date,
-                emit_time=emit_time,
-                person_id=kwargs.get('person_id'),
-                user_id=user_id,
-                company_id=company_id,
-                currency=kwargs['currency'],
-                global_discount_percent=kwargs['global_discount_percent'],
-                global_discount=kwargs['global_discount'],
-                total_discount=kwargs['total_discount'],
-                igv_percent=kwargs['igv_percent'],
-                igv_amount=kwargs['igv_amount'],
-                total_taxable=kwargs['total_taxable'],
-                total_unaffected=kwargs['total_unaffected'],
-                total_exempt=kwargs['total_exempt'],
-                total_free=kwargs['total_free'],
-                total_amount=kwargs['total_amount']
-            )
-
-            # Crear los detalles (código existente)
-            for item in kwargs['items']:
-                product = Product.objects.get(id=item['product_id'])
-
-                quantity = Decimal(str(item['quantity']))
-                unit_value = Decimal(str(item['unit_value']))
-                unit_price = Decimal(str(item['unit_price']))
-                discount_percentage = Decimal(str(item.get('discount_percentage', 0)))
-
-                total_value = quantity * unit_value
-                total_discount = total_value * (discount_percentage / 100)
-                total_value_after_discount = total_value - total_discount
-
-                type_affectation = TypeAffectation.objects.get(code=item['type_affectation_id'])
-                if type_affectation.code == 10:  # Gravada
-                    total_igv = total_value_after_discount * (Decimal(str(kwargs['igv_percent'])) / 100)
-                else:
-                    total_igv = Decimal('0')
-
-                total_amount_detail = total_value_after_discount + total_igv
-
-                OperationDetail.objects.create(
-                    operation=operation,
-                    product=product,
-                    description=product.description,
-                    type_affectation_id=item['type_affectation_id'],
-                    quantity=quantity,
-                    unit_value=unit_value,
-                    unit_price=unit_price,
-                    discount_percentage=discount_percentage,
-                    total_discount=total_discount,
-                    total_value=total_value_after_discount,
-                    total_igv=total_igv,
-                    total_amount=total_amount_detail
-                )
-
-                # Actualizar stock
-                if operation_type == 'S':
-                    product.stock -= quantity
-                    product.save()
-                elif operation_type == 'E':
-                    product.stock += quantity
-                    product.purchase_price = unit_price
-                    product.save()
-            payment_type = 'I'
-            notes_operation = "SIN ESPECIFICAR"
-            if operation_type == 'S':
-                payment_type = 'I'
-                notes_operation = "SALIDA DE PRODUCTOS"
-            elif operation_type == 'E':
-                payment_type = 'E'
-                notes_operation = "ENTRADA DE PRODUCTOS"
-            # NUEVO: Crear los pagos
-            payments = kwargs.get('payments', [])
-            total_paid = Decimal('0')
-
-            # Si no hay pagos o is_payment está deshabilitado, crear pago automático
-            if not payments:
-                # ✅ CORREGIDO: Usar emit_date con la hora actual en zona horaria de Perú
-                current_time_peru = timezone.now().astimezone(peru_tz).time()
-                payment_datetime = timezone.make_aware(
-                    datetime.combine(emit_date, current_time_peru),
-                    timezone=peru_tz
-                )
-
-                # Si no tiene pagos habilitados, crear pago automático al contado/efectivo
-                Payment.objects.create(
-                    payment_type='CN',  # Contado
-                    payment_method='E',  # Efectivo
-                    status='C',  # Cancelado
-                    type=payment_type,
-                    notes=notes_operation,
-                    user_id=user_id,
-                    operation=operation,
-                    company_id=company_id,
-                    payment_date=payment_datetime,
-                    total_amount=operation.total_amount,
-                    paid_amount=operation.total_amount
-                )
-                total_paid = operation.total_amount
-            else:
-                # Crear los pagos enviados desde el frontend
-                for payment_data in payments:
-                    # ✅ CORREGIDO: Parsear la fecha y convertirla a datetime con timezone de Perú
-                    naive_datetime = datetime.strptime(payment_data['payment_date'], '%Y-%m-%d %H:%M:%S')
-                    payment_datetime = timezone.make_aware(naive_datetime, timezone=peru_tz)
-
-                    paid_amount = Decimal(str(payment_data['paid_amount']))
-                    # Versión mejorada con validación de notes
-                    notes = payment_data.get('notes', '')
-                    if not notes:  # Esto cubre None, '', '   ', etc.
-                        notes = notes_operation
-                    elif len(notes.strip()) <= 4:  # Si quieres descartar textos muy cortos
-                        notes = f"{notes_operation} - {notes}"
-
-                    Payment.objects.create(
-                        payment_type=payment_data['payment_type'],
-                        payment_method=payment_data['payment_method'],
-                        status=payment_data.get('status', 'C'),
-                        type=payment_type,
-                        notes=notes,
-                        user_id=kwargs['user_id'],
-                        operation=operation,
-                        company_id=company_id,
-                        payment_date=payment_datetime,  # Usar datetime con timezone
-                        total_amount=operation.total_amount,
-                        paid_amount=paid_amount
-                    )
-                    total_paid += paid_amount
-
-            # Convertir ambos valores a Decimal
-            total_paid_decimal = Decimal(str(total_paid))
-            operation_total_decimal = Decimal(str(operation.total_amount))
-
-            if abs(total_paid_decimal - operation_total_decimal) > Decimal('0.01'):
-                raise Exception(
-                    f'El total pagado ({total_paid}) no coincide con el total de la operación ({operation.total_amount})')
-
-            return CreateOperation(
-                operation=operation,
+            return CheckTaskStatus(
                 success=True,
-                message='Operación creada exitosamente'
+                status=status,
+                result=task_result,
+                message=f'Estado de tarea: {status}'
             )
 
         except Exception as e:
-            transaction.set_rollback(True)
-            return CreateOperation(
-                operation=None,
+            return CheckTaskStatus(
                 success=False,
-                message=str(e)
+                status='ERROR',
+                result=None,
+                message=f'Error verificando tarea: {str(e)}'
             )
-# class CreateOperation(graphene.Mutation):
-#     class Arguments:
-#         document_id = graphene.ID()
-#         serial_id = graphene.ID()
-#         operation_type = graphene.String(required=True)
-#         operation_date = graphene.String(required=True)
-#         serial = graphene.String()
-#         number = graphene.Int()
-#         emit_date = graphene.String(required=True)
-#         emit_time = graphene.String(required=True)
-#         person_id = graphene.ID()
-#         user_id = graphene.ID(required=True)
-#         company_id = graphene.ID(required=True)
-#         currency = graphene.String(default_value='PEN')
-#         global_discount_percent = graphene.Float(default_value=0)
-#         global_discount = graphene.Float(default_value=0)
-#         total_discount = graphene.Float(default_value=0)
-#         igv_percent = graphene.Float(default_value=18)
-#         igv_amount = graphene.Float(required=True)
-#         total_taxable = graphene.Float(default_value=0)
-#         total_unaffected = graphene.Float(default_value=0)
-#         total_exempt = graphene.Float(default_value=0)
-#         total_free = graphene.Float(default_value=0)
-#         total_amount = graphene.Float(required=True)
-#         items = graphene.List(OperationDetailInput, required=True)
-#         payments = graphene.List(PaymentInput, required=True)  # Nuevo campo
-#
-#     operation = graphene.Field(OperationType)
-#     success = graphene.Boolean()
-#     message = graphene.String()
-#
-#     @transaction.atomic
-#     def mutate(self, info, **kwargs):
-#         try:
-#             print('Operacion:', kwargs)
-#
-#             # Parsear fechas
-#             operation_date = datetime.strptime(kwargs['operation_date'], '%Y-%m-%d').date()
-#             emit_date = datetime.strptime(kwargs['emit_date'], '%Y-%m-%d').date()
-#             emit_time = datetime.strptime(kwargs['emit_time'], '%H:%M:%S').time()
-#
-#             operation_type = kwargs['operation_type']
-#             company_id = kwargs['company_id']
-#             document_id = kwargs.get('document_id')
-#             serial = None
-#             next_number = None
-#
-#             # Lógica existente para serial y número
-#             if operation_type == "E":
-#                 serial = kwargs.get('serial', '')
-#                 next_number = kwargs.get('number', 0)
-#                 document_id = None
-#                 if serial == "" or next_number == 0:
-#                     serial = "E001"
-#                     next_number = generate_next_number(serial, company_id, operation_type)
-#             elif operation_type == "S":
-#                 serial_document = Serial.objects.get(id=kwargs['serial_id'])
-#                 serial = serial_document.serial
-#                 next_number = generate_next_number(serial, company_id, operation_type)
-#
-#             user_id = kwargs['user_id']
-#
-#             # Crear la operación
-#             operation = Operation.objects.create(
-#                 document_id=document_id,
-#                 serial=serial,
-#                 number=next_number,
-#                 operation_type=operation_type,
-#                 operation_status='1',  # Registrado
-#                 operation_date=operation_date,
-#                 emit_date=emit_date,
-#                 emit_time=emit_time,
-#                 person_id=kwargs.get('person_id'),
-#                 user_id=user_id,
-#                 company_id=company_id,
-#                 currency=kwargs['currency'],
-#                 global_discount_percent=kwargs['global_discount_percent'],
-#                 global_discount=kwargs['global_discount'],
-#                 total_discount=kwargs['total_discount'],
-#                 igv_percent=kwargs['igv_percent'],
-#                 igv_amount=kwargs['igv_amount'],
-#                 total_taxable=kwargs['total_taxable'],
-#                 total_unaffected=kwargs['total_unaffected'],
-#                 total_exempt=kwargs['total_exempt'],
-#                 total_free=kwargs['total_free'],
-#                 total_amount=kwargs['total_amount']
-#             )
-#
-#             # Crear los detalles (código existente)
-#             for item in kwargs['items']:
-#                 product = Product.objects.get(id=item['product_id'])
-#
-#                 quantity = Decimal(str(item['quantity']))
-#                 unit_value = Decimal(str(item['unit_value']))
-#                 unit_price = Decimal(str(item['unit_price']))
-#                 discount_percentage = Decimal(str(item.get('discount_percentage', 0)))
-#
-#                 total_value = quantity * unit_value
-#                 total_discount = total_value * (discount_percentage / 100)
-#                 total_value_after_discount = total_value - total_discount
-#
-#                 type_affectation = TypeAffectation.objects.get(code=item['type_affectation_id'])
-#                 if type_affectation.code == 10:  # Gravada
-#                     total_igv = total_value_after_discount * (Decimal(str(kwargs['igv_percent'])) / 100)
-#                 else:
-#                     total_igv = Decimal('0')
-#
-#                 total_amount_detail = total_value_after_discount + total_igv
-#
-#                 OperationDetail.objects.create(
-#                     operation=operation,
-#                     product=product,
-#                     description=product.description,
-#                     type_affectation_id=item['type_affectation_id'],
-#                     quantity=quantity,
-#                     unit_value=unit_value,
-#                     unit_price=unit_price,
-#                     discount_percentage=discount_percentage,
-#                     total_discount=total_discount,
-#                     total_value=total_value_after_discount,
-#                     total_igv=total_igv,
-#                     total_amount=total_amount_detail
-#                 )
-#
-#                 # Actualizar stock
-#                 if operation_type == 'S':
-#                     product.stock -= quantity
-#                     product.save()
-#                 elif operation_type == 'E':
-#                     product.stock += quantity
-#                     product.purchase_price = unit_price
-#                     product.save()
-#             payment_type = 'I'
-#             notes_operation = "SIN ESPECIFICAR"
-#             if operation_type == 'S':
-#                 payment_type = 'I'
-#                 notes_operation = "SALIDA DE PRODUCTOS"
-#             elif operation_type == 'E':
-#                 payment_type = 'E'
-#                 notes_operation = "ENTRADA DE PRODUCTOS"
-#             # NUEVO: Crear los pagos
-#             payments = kwargs.get('payments', [])
-#             total_paid = Decimal('0')
-#
-#             # Si no hay pagos o is_payment está deshabilitado, crear pago automático
-#             if not payments:
-#                 # Usar emit_date con la hora actual (no time.min)
-#                 current_time = timezone.now().time()
-#                 payment_datetime = timezone.make_aware(
-#                     datetime.combine(emit_date, current_time)
-#                 )
-#
-#                 # Si no tiene pagos habilitados, crear pago automático al contado/efectivo
-#                 Payment.objects.create(
-#                     payment_type='CN',  # Contado
-#                     payment_method='E',  # Efectivo
-#                     status='C',  # Cancelado
-#                     type=payment_type,
-#                     notes=notes_operation,
-#                     user_id=user_id,
-#                     operation=operation,
-#                     company_id=company_id,
-#                     payment_date=payment_datetime,
-#                     total_amount=operation.total_amount,
-#                     paid_amount=operation.total_amount
-#                 )
-#                 total_paid = operation.total_amount
-#             else:
-#                 # Crear los pagos enviados desde el frontend
-#                 for payment_data in payments:
-#                     # Parsear la fecha y convertirla a datetime con timezone
-#                     # Ahora (fecha y hora completa)
-#                     payment_datetime = timezone.make_aware(
-#                         datetime.strptime(payment_data['payment_date'], '%Y-%m-%d %H:%M:%S')
-#                     )
-#                     paid_amount = Decimal(str(payment_data['paid_amount']))
-#                     # Versión mejorada con validación de notes
-#                     notes = payment_data.get('notes', '')
-#                     if not notes:  # Esto cubre None, '', '   ', etc.
-#                         notes = notes_operation
-#                     elif len(notes.strip()) <= 4:  # Si quieres descartar textos muy cortos
-#                         notes = f"{notes_operation} - {notes}"
-#
-#                     Payment.objects.create(
-#                         payment_type=payment_data['payment_type'],
-#                         payment_method=payment_data['payment_method'],
-#                         status=payment_data.get('status', 'C'),
-#                         type=payment_type,
-#                         notes=notes,
-#                         user_id=kwargs['user_id'],
-#                         operation=operation,
-#                         company_id=company_id,
-#                         payment_date=payment_datetime,  # Usar datetime con timezone
-#                         total_amount=operation.total_amount,
-#                         paid_amount=paid_amount
-#                     )
-#                     total_paid += paid_amount
-#
-#             # Convertir ambos valores a Decimal
-#             total_paid_decimal = Decimal(str(total_paid))
-#             operation_total_decimal = Decimal(str(operation.total_amount))
-#
-#             if abs(total_paid_decimal - operation_total_decimal) > Decimal('0.01'):
-#                 raise Exception(
-#                     f'El total pagado ({total_paid}) no coincide con el total de la operación ({operation.total_amount})')
-#
-#             return CreateOperation(
-#                 operation=operation,
-#                 success=True,
-#                 message='Operación creada exitosamente'
-#             )
-#
-#         except Exception as e:
-#             transaction.set_rollback(True)
-#             return CreateOperation(
-#                 operation=None,
-#                 success=False,
-#                 message=str(e)
-#             )
 
 
-class CancelOperation(graphene.Mutation):
+class ResendOperationToBilling(graphene.Mutation):
     class Arguments:
         operation_id = graphene.ID(required=True)
-        reason = graphene.String(required=True)
 
     success = graphene.Boolean()
     message = graphene.String()
+    operation = graphene.Field(OperationType)
 
-    @transaction.atomic
-    def mutate(self, info, operation_id, reason):
+    def mutate(self, info, operation_id):
         try:
+            from operations.models import Operation
+            from operations.tasks import process_electronic_billing_task
+
             operation = Operation.objects.get(id=operation_id)
 
-            # Validar que se pueda anular
-            if operation.operation_status not in ['1', '2']:
-                return CancelOperation(
+            # Validar que se puede reenviar
+            if operation.billing_status in ['ACCEPTED', 'CANCELLED']:
+                return ResendOperationToBilling(
                     success=False,
-                    message='La operación no puede ser anulada en su estado actual'
+                    message='No se puede reenviar un documento ya procesado o anulado',
+                    operation=operation
                 )
 
-            # Cambiar estado
-            operation.operation_status = '3'  # Pendiente de baja
-            operation.sunat_description_low = reason
-            operation.low_date = date.today()
-            operation.save()
+            # Resetear contador de reintentos si es necesario
+            if operation.retry_count >= operation.max_retries:
+                operation.retry_count = 0
+                operation.save()
 
-            # Revertir stock si es salida
-            if operation.operation_type == 'S':
-                for detail in operation.operationdetail_set.all():
-                    if detail.product:
-                        detail.product.stock += detail.quantity
-                        detail.product.save()
+            # Lanzar tarea de facturación
+            process_electronic_billing_task.delay(operation_id)
 
-            return CancelOperation(
+            return ResendOperationToBilling(
                 success=True,
-                message='Operación anulada exitosamente'
+                message='Documento reenviado para facturación',
+                operation=operation
             )
 
-        except Exception as e:
-            transaction.set_rollback(True)
-            return CancelOperation(
+        except Operation.DoesNotExist:
+            return ResendOperationToBilling(
                 success=False,
-                message=str(e)
+                message='Operación no encontrada',
+                operation=None
+            )
+        except Exception as e:
+            return ResendOperationToBilling(
+                success=False,
+                message=str(e),
+                operation=None
             )
 
 

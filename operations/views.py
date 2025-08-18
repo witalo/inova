@@ -3,6 +3,8 @@ from decimal import Decimal
 # Create your views here.
 from operations.apis import ApisNetPe
 from operations.models import Operation
+import pytz
+from django.utils import timezone as django_timezone
 
 APIS_TOKEN = "Bearer apis-token-3244.1KWBKUSrgYq6HNht68arg8LNsId9vVLm"
 api_net = ApisNetPe(APIS_TOKEN)
@@ -57,3 +59,15 @@ def calculate_operation_totals(details, igv_percent=18):
 
     return totals
 
+
+# Funciones helper para manejo de zona horaria
+def get_peru_date():
+    """Obtener la fecha actual en zona horaria de Perú"""
+    peru_tz = pytz.timezone('America/Lima')
+    return django_timezone.now().astimezone(peru_tz).date()
+
+
+def get_peru_datetime():
+    """Obtener fecha y hora actual en zona horaria de Perú"""
+    peru_tz = pytz.timezone('America/Lima')
+    return django_timezone.now().astimezone(peru_tz)

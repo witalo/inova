@@ -33,14 +33,6 @@ class Serial(models.Model):
         verbose_name_plural = 'Series'
 
 
-STATUS_CHOICES = [
-    ('1', 'REGISTRADO'),  # BD
-    ('2', 'EMITIDO'),  # ENVIADO GENERO CDR
-    ('3', 'PENDIENTE DE BAJA'),  # BOL/FACT/NOT CRE
-    ('4', 'EN PROCESO DE BAJA'),  # BOL/FACT/NOT CRE
-    ('5', 'DADO DE BAJA'),
-    ('6', 'RECHAZADO')
-]
 OPERATION_TYPE_CHOICES = [
     ('E', 'ENTRADA'),
     ('S', 'SALIDA')
@@ -55,7 +47,25 @@ class Operation(models.Model):
     id = models.AutoField(primary_key=True)
     document = models.ForeignKey('Document', on_delete=models.SET_NULL, null=True, blank=True)
     operation_type = models.CharField('TIPO DE OPERACION', max_length=1, choices=OPERATION_TYPE_CHOICES, default='NA')
-    operation_status = models.CharField('ESTADO', max_length=1, choices=STATUS_CHOICES, default='1')
+    billing_status = models.CharField(
+        'Estado Facturación',
+        max_length=30,
+        choices=[
+            ('REGISTER', 'Registrado'),
+            ('PENDING', 'Pendiente'),
+            ('PROCESSING', 'Procesando'),
+            ('SENT', 'Enviado'),
+            ('ACCEPTED', 'Emitido'),
+            ('ACCEPTED_WITH_OBSERVATIONS', 'Emitido con observaciones'),
+            ('REJECTED', 'Rechazado'),
+            ('ERROR', 'Error'),
+            ('PROCESSING_CANCELLATION', 'Procesando anulación'),
+            ('CANCELLATION_PENDING', 'Anulación pendiente'),
+            ('CANCELLED', 'Anulado'),
+            ('CANCELLATION_ERROR', 'Error en anulación'),
+        ],
+        default='REGISTER'
+    )
     serial = models.CharField(verbose_name='SERIE', max_length=4, null=True, blank=True)
     number = models.IntegerField(verbose_name='NUMERO', null=True, blank=True)
     currency = models.CharField('MONEDA', max_length=3, choices=CURRENCY_TYPE_CHOICES, default='PEN')
@@ -65,7 +75,6 @@ class Operation(models.Model):
     emit_date = models.DateField(null=True, blank=True)
     emit_time = models.TimeField(null=True, blank=True)
     due_date = models.DateField(null=True, blank=True)
-    low_date = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     user = models.ForeignKey('users.User', on_delete=models.SET_NULL, null=True, blank=True)
@@ -88,21 +97,54 @@ class Operation(models.Model):
     total_amount = models.DecimalField('TOTAL IMPORTE', max_digits=15, decimal_places=6, default=0)
 
     send_person = models.BooleanField(default=False)
-    sunat_description = models.CharField(verbose_name='DESCRIPCION SUNAT', max_length=300, null=True, blank=True)
-    sunat_description_low = models.CharField(verbose_name='DESCRIPCION SUNAT BAJA', max_length=300, null=True,
-                                             blank=True)
-    sunat_status = models.BooleanField(default=False)
     parent_operation = models.ForeignKey('Operation', on_delete=models.SET_NULL, null=True, blank=True)
-
-    link_xml = models.CharField('ENLACE XML', max_length=900, null=True, blank=True)
-    link_cdr = models.CharField('ENLACE CDR', max_length=900, null=True, blank=True)
     low_number = models.IntegerField(verbose_name='NUMERO ANULACION', null=True, blank=True)
     summary_number = models.IntegerField(verbose_name='NUMERO RESUMEN', null=True, blank=True)
-    low_ticket = models.CharField('TICKET ANULACION', max_length=100, null=True, blank=True)
-    link_xml_low = models.CharField('ENLACE XML DE BAJA', max_length=900, null=True, blank=True)
-    link_cdr_low = models.CharField('ENLACE CDR DE BAJA', max_length=900, null=True, blank=True)
 
-    code_hash = models.CharField('CODIGO HASH', max_length=900, null=True, blank=True)
+    # Códigos y descripciones SUNAT
+    sunat_response_code = models.CharField('Código Respuesta SUNAT', max_length=10, null=True, blank=True)
+    sunat_response_description = models.TextField('Descripción Respuesta SUNAT', null=True, blank=True)
+    sunat_error_code = models.CharField('Código Error SUNAT', max_length=10, null=True, blank=True)
+    sunat_error_description = models.TextField('Descripción Error SUNAT', null=True, blank=True)
+
+    # Archivos generados
+    xml_file_path = models.CharField('Ruta XML', max_length=800, null=True, blank=True)
+    signed_xml_file_path = models.CharField('Ruta XML Firmado', max_length=800, null=True, blank=True)
+    cdr_file_path = models.CharField('Ruta CDR', max_length=800, null=True, blank=True)
+    hash_code = models.CharField('Código Hash', max_length=800, null=True, blank=True)
+
+    # Control de reintentos
+    retry_count = models.IntegerField('Intentos de Envío', default=0)
+    max_retries = models.IntegerField('Máximo Intentos', default=5)
+    last_retry_at = models.DateTimeField('Último Intento', null=True, blank=True)
+
+    # Datos para anulación
+    cancellation_reason = models.CharField(
+        'Motivo de anulación',
+        max_length=2,
+        null=True,
+        blank=True,
+        choices=[
+            ('01', 'Anulación de la operación'),
+            ('02', 'Anulación por error en el RUC'),
+            ('03', 'Anulación por error en la descripción'),
+            ('04', 'Descuento global'),
+            ('05', 'Bonificación'),
+            ('06', 'Devolución total'),
+            ('07', 'Devolución parcial'),
+            ('08', 'Otros conceptos'),
+        ]
+    )
+    cancellation_description = models.TextField('Descripción Anulación', null=True, blank=True)
+    cancellation_ticket = models.CharField('Ticket Anulación', max_length=100, null=True, blank=True)
+    cancellation_date = models.DateField('Fecha Anulación', null=True, blank=True)
+    cancellation_xml_path = models.CharField('Ruta XML anulación', max_length=800, null=True, blank=True)
+    cancellation_cdr_path = models.CharField(
+        'Ruta CDR anulación',
+        max_length=800,
+        null=True,
+        blank=True
+    )
 
     class Meta:
         verbose_name = 'Operacion'

@@ -4,6 +4,8 @@ from django.contrib.auth.hashers import make_password, check_password
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
+from operations.services.billing_service import BillingFileManager
+
 PDF_SIZES = [
     ('T', 'Ticket'),
     ('A', 'A4'),
@@ -30,8 +32,33 @@ class Company(models.Model):
     pdf_color = models.CharField('Color PDF', max_length=7, default='#000000')
     is_active = models.BooleanField('Activo', default=True)
     is_payment = models.BooleanField('Activar Pago', default=False)
+    is_billing = models.BooleanField('Activar Facturacion', default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    # Configuración SUNAT
+    environment = models.CharField(
+        'Entorno SUNAT',
+        max_length=20,
+        choices=[
+            ('BETA', 'Beta/Pruebas'),
+            ('PRODUCTION', 'Producción'),
+        ],
+        default='BETA'
+    )
+
+    # Credenciales SUNAT
+    sunat_username = models.CharField('Usuario SUNAT', max_length=100, null=True, blank=True)
+    sunat_password = models.CharField('Contraseña SUNAT', max_length=150, null=True, blank=True)
+
+    # Certificado digital
+    certificate_path = models.CharField('Ruta Certificado', max_length=500, null=True, blank=True)
+    private_key_path = models.CharField('Ruta Clave Privada', max_length=500, null=True, blank=True)
+    certificate_password = models.CharField('Contraseña Certificado', max_length=100, null=True, blank=True)
+
+    # Configuración adicional
+    max_retry_attempts = models.IntegerField('Máximo Intentos', default=5)
+    retry_interval_minutes = models.IntegerField('Intervalo Reintentos (min)', default=30)
 
     def set_password(self, raw_password):
         """Encripta y guarda la contraseña"""
@@ -57,6 +84,9 @@ class Company(models.Model):
             pass
 
         super().save(*args, **kwargs)
+        # Crear estructura de carpetas al guardar
+        if self.ruc:
+            BillingFileManager.create_company_folders(self.ruc)
 
     def __str__(self):
         return self.denomination or f"Empresa {self.ruc}"

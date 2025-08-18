@@ -11,7 +11,8 @@ from finances.models import Payment
 from operations import models
 from operations.apis import ApisNetPe
 from operations.models import Person
-from operations.mutations import PersonMutation, CreateOperation, CancelOperation, CreatePerson
+from operations.mutations import PersonMutation, CreateOperation, CancelOperation, CreatePerson, \
+    ResendOperationToBilling
 from operations.types import *
 from django.conf import settings
 from datetime import datetime, timedelta, date
@@ -456,7 +457,7 @@ class OperationsQuery(graphene.ObjectType):
             company_id=company_id,
             emit_date__range=[start, end],
             operation_type='S',
-            operation_status__in=['1', '2']
+            billing_status__in=['REGISTER', 'PENDING', 'PROCESSING', 'SENT', 'ACCEPTED', 'ACCEPTED_WITH_OBSERVATIONS']
         )
 
         summary = operations.aggregate(
@@ -516,9 +517,9 @@ class OperationsQuery(graphene.ObjectType):
 
         return Operation.objects.filter(
             company_id=company_id,
-            operation_status__in=['3', '4']  # Pendiente de baja o En proceso de baja
+            billing_status__in=['REJECTED', 'ERROR', 'PROCESSING_CANCELLATION', 'CANCELLATION_PENDING', 'CANCELLED', 'CANCELLATION_ERROR']
         ).select_related('document', 'person').annotate(
-            days_since_pending=timezone.now() - models.F('low_date')
+            days_since_pending=timezone.now() - models.F('cancellation_date')
         )
 
     @staticmethod
@@ -532,7 +533,7 @@ class OperationsQuery(graphene.ObjectType):
             company_id=company_id,
             emit_date__gte=start,
             emit_date__lte=end
-        ) & ~Q(operation_status__in=['5', '6'])  # Excluir anuladas y rechazadas
+        ) & ~Q(billing_status__in=['REJECTED', 'ERROR', 'PROCESSING_CANCELLATION', 'CANCELLATION_PENDING', 'CANCELLED', 'CANCELLATION_ERROR'])  # Excluir anuladas y rechazadas
 
         # 1. Obtener operaciones diarias agrupadas
         daily_operations = []
@@ -583,7 +584,7 @@ class OperationsQuery(graphene.ObjectType):
             operation__emit_date__lte=end,
             operation__operation_type='S'
         ).exclude(
-            operation__operation_status__in=['5', '6']
+            operation__billing_status__in=['REJECTED', 'ERROR', 'PROCESSING_CANCELLATION', 'CANCELLATION_PENDING', 'CANCELLED', 'CANCELLATION_ERROR']
         ).values(
             'product_id',
             'product__description',
@@ -615,7 +616,7 @@ class OperationsQuery(graphene.ObjectType):
             operation__emit_date__lte=end,
             operation__operation_type='E'
         ).exclude(
-            operation__operation_status__in=['5', '6']
+            operation__billing_status__in=['REJECTED', 'ERROR', 'PROCESSING_CANCELLATION', 'CANCELLATION_PENDING', 'CANCELLED', 'CANCELLATION_ERROR']
         ).values(
             'product_id',
             'product__description',
@@ -696,7 +697,7 @@ class OperationsQuery(graphene.ObjectType):
         base_filter = Q(
             company_id=company_id,
             emit_date=target_date
-        ) & ~Q(operation_status__in=['5', '6'])  # Excluir anuladas y rechazadas
+        ) & ~Q(billing_status__in=['REJECTED', 'ERROR', 'PROCESSING_CANCELLATION', 'CANCELLATION_PENDING', 'CANCELLED', 'CANCELLATION_ERROR'])  # Excluir anuladas y rechazadas
 
         # 1. Obtener totales del día
         daily_totals = Operation.objects.filter(base_filter).aggregate(
@@ -724,7 +725,7 @@ class OperationsQuery(graphene.ObjectType):
             emit_date=previous_date,
             operation_type='S'
         ).exclude(
-            operation_status__in=['5', '6']
+            billing_status__in=['REJECTED', 'ERROR', 'PROCESSING_CANCELLATION', 'CANCELLATION_PENDING', 'CANCELLED', 'CANCELLATION_ERROR']
         ).aggregate(
             total=Sum('total_amount')
         )['total'] or 0
@@ -777,7 +778,7 @@ class OperationsQuery(graphene.ObjectType):
                     WHERE company_id = %s 
                         AND emit_date = %s 
                         AND operation_type = 'S'
-                        AND operation_status NOT IN ('5', '6')
+                        AND billing_status NOT IN ('REJECTED', 'ERROR', 'PROCESSING_CANCELLATION', 'CANCELLATION_PENDING', 'CANCELLED', 'CANCELLATION_ERROR')
                         AND emit_time IS NOT NULL
                     GROUP BY EXTRACT(hour FROM emit_time)
                     ORDER BY hour
@@ -820,7 +821,7 @@ class OperationsQuery(graphene.ObjectType):
             company_id=company_id,
             emit_date=target_date
         ).exclude(
-            operation_status__in=['5', '6']
+            billing_status__in=['REJECTED', 'ERROR', 'PROCESSING_CANCELLATION', 'CANCELLATION_PENDING', 'CANCELLED', 'CANCELLATION_ERROR']
         ).aggregate(
             total_sales=Sum(
                 'total_amount',
@@ -873,7 +874,7 @@ class OperationsQuery(graphene.ObjectType):
             emit_date__gte=first_day,
             emit_date__lte=last_day
         ).exclude(
-            operation_status__in=['3', '4', '5', '6']  # Excluir anuladas
+            billing_status__in=['REJECTED', 'ERROR', 'PROCESSING_CANCELLATION', 'CANCELLATION_PENDING', 'CANCELLED', 'CANCELLATION_ERROR']  # Excluir anuladas
         )
 
         # 1. DAILY REPORTS
@@ -1010,7 +1011,7 @@ class OperationsQuery(graphene.ObjectType):
             emit_date__gte=prev_first_day,
             emit_date__lte=prev_last_day
         ).exclude(
-            operation_status__in=['3', '4', '5', '6']
+            billing_status__in=['REJECTED', 'ERROR', 'PROCESSING_CANCELLATION', 'CANCELLATION_PENDING', 'CANCELLED', 'CANCELLATION_ERROR']
         )
 
         # Debug para ver cuántas operaciones encuentra
@@ -1147,4 +1148,5 @@ class OperationsMutation(graphene.ObjectType):
     person_mutation = PersonMutation.Field()
     create_operation = CreateOperation.Field()
     cancel_operation = CancelOperation.Field()
+    resend_operation_to_billing = ResendOperationToBilling.Field()
     create_person = CreatePerson.Field()
