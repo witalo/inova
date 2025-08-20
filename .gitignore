@@ -10,6 +10,6 @@ inova/settings.py
 #static
 migrations
 .idea
-/staticfiles
-mediafiles
-media
+#/staticfiles
+#mediafiles
+#media
