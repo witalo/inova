@@ -55,6 +55,9 @@ class CancellationService:
                 error_msg = f"Solo se pueden anular documentos aceptados por SUNAT. Estado actual: {self.operation.billing_status}"
                 logger.error(error_msg)
                 raise ValueError(error_msg)
+            # ⚠️ VALIDACIÓN MEJORADA: Verificar datos del cliente
+            if not self.operation.person:
+                logger.warning("Operación sin persona asociada, usando datos por defecto para cliente varios")
 
             # Determinar tipo de documento
             doc_type = self.operation.document.code if self.operation.document else '03'
@@ -204,6 +207,9 @@ class CancellationService:
         os.makedirs(os.path.dirname(xml_path), exist_ok=True)
         with open(xml_path, 'w', encoding='iso-8859-1') as f:
             f.write(xml_content)
+        # ⚠️ GUARDAR RUTA EN LA OPERACIÓN
+        self.operation.cancellation_xml_path = xml_path
+        self.operation.save()
 
         logger.info(f"XML de baja generado: {filename}.xml")
         return xml_path
@@ -266,8 +272,8 @@ class CancellationService:
 <cbc:DocumentTypeCode>03</cbc:DocumentTypeCode>
 <cbc:ID>{self.operation.serial}-{self.operation.number}</cbc:ID>
 <cac:AccountingCustomerParty>
-<cbc:CustomerAssignedAccountID>{self.operation.person.document}</cbc:CustomerAssignedAccountID>
-<cbc:AdditionalAccountID>{self._get_person_doc_type()}</cbc:AdditionalAccountID>
+<cbc:CustomerAssignedAccountID>{self._get_customer_document()}</cbc:CustomerAssignedAccountID>
+<cbc:AdditionalAccountID>{self._get_customer_doc_type()}</cbc:AdditionalAccountID>
 </cac:AccountingCustomerParty>
 <cac:Status>
 <cbc:ConditionCode>{status}</cbc:ConditionCode>
@@ -302,7 +308,9 @@ class CancellationService:
         os.makedirs(os.path.dirname(xml_path), exist_ok=True)
         with open(xml_path, 'w', encoding='iso-8859-1') as f:
             f.write(xml_content)
-
+        # ⚠️ GUARDAR RUTA EN LA OPERACIÓN
+        self.operation.cancellation_xml_path = xml_path
+        self.operation.save()
         logger.info(f"XML de resumen generado: {filename}.xml")
 
         # Validar XML generado
@@ -316,15 +324,60 @@ class CancellationService:
 
         return xml_path
 
+    def _get_customer_document(self):
+        """
+        Obtener documento del cliente de forma segura
+        Returns '00000000' para clientes varios o sin documento
+        """
+        try:
+            if (self.operation.person and
+                    hasattr(self.operation.person, 'document') and
+                    self.operation.person.document and
+                    self.operation.person.document.strip()):
+
+                doc = self.operation.person.document.strip()
+                # Validar que no sea una cadena vacía o solo ceros
+                if doc and doc != "0" * len(doc):
+                    return doc
+        except (AttributeError, TypeError):
+            pass
+
+        # Valor por defecto para clientes varios
+        return "00000000"
+
+    def _get_customer_doc_type(self):
+        """
+        Obtener tipo de documento del cliente de forma segura
+        Returns '0' para clientes varios o sin documento específico
+        """
+        try:
+            document = self._get_customer_document()
+
+            # Si es el documento por defecto, retornar tipo 0
+            if document == "00000000":
+                return "0"
+
+            # Determinar por longitud
+            if len(document) == 8:
+                return "1"  # DNI
+            elif len(document) == 11:
+                return "6"  # RUC
+
+            # Intentar obtener del person_type si existe
+            if (self.operation.person and
+                    hasattr(self.operation.person, 'person_type') and
+                    self.operation.person.person_type):
+                return str(self.operation.person.person_type)
+
+        except (AttributeError, TypeError, ValueError):
+            pass
+
+        # Valor por defecto
+        return "0"
+
     def _get_person_doc_type(self):
         """Obtener tipo de documento del cliente"""
-        doc_length = len(self.operation.person.document)
-        if doc_length == 8:
-            return '1'  # DNI
-        elif doc_length == 11:
-            return '6'  # RUC
-        else:
-            return self.operation.person.person_type
+        return self._get_customer_doc_type()
 
     def _format_decimal(self, value, decimals=2):
         """Formatear decimal"""
@@ -379,6 +432,10 @@ class CancellationService:
         if signed_path != final_path:
             import shutil
             shutil.move(signed_path, final_path)
+
+        # ⚠️ GUARDAR RUTA DEL XML FIRMADO
+        self.operation.cancellation_signed_xml_path = final_path
+        self.operation.save()
 
         logger.info(f"XML firmado: {filename}")
         return final_path
@@ -664,7 +721,7 @@ class CancellationService:
 
             logger.info(f"CDR de anulación guardado: {cdr_filename}")
 
-            # Actualizar operación
+            # ⚠️ ACTUALIZAR OPERACIÓN CON TODAS LAS RUTAS
             self.operation.cancellation_cdr_path = cdr_path
             self.operation.save()
 

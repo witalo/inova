@@ -56,6 +56,13 @@ class OperationType(DjangoObjectType):
     global_discount_percent = graphene.Float(required=True)
     payment_set = graphene.List(PaymentType)
 
+    xml_download_url = graphene.String()
+    signed_xml_download_url = graphene.String()
+    cdr_download_url = graphene.String()
+    cancellation_xml_download_url = graphene.String()
+    cancellation_signed_xml_download_url = graphene.String()
+    cancellation_cdr_download_url = graphene.String()
+
     class Meta:
         model = Operation
         fields = '__all__'
@@ -63,11 +70,26 @@ class OperationType(DjangoObjectType):
     def resolve_details(self, info):
         return self.operationdetail_set.all()
 
-    def resolve_details(self, info):
-        return self.operationdetail_set.all()
-
     def resolve_payment_set(self, info):
         return self.payment_set.all()
+
+    def resolve_xml_download_url(self, info):
+        return self.xml_download_url
+
+    def resolve_signed_xml_download_url(self, info):
+        return self.signed_xml_download_url
+
+    def resolve_cdr_download_url(self, info):
+        return self.cdr_download_url
+
+    def resolve_cancellation_xml_download_url(self, info):
+        return self.cancellation_xml_download_url
+
+    def resolve_cancellation_signed_xml_download_url(self, info):
+        return self.cancellation_signed_xml_download_url
+
+    def resolve_cancellation_cdr_download_url(self, info):
+        return self.cancellation_cdr_download_url
 
 
 class OperationDetailType(DjangoObjectType):

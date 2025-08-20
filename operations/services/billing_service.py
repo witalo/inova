@@ -212,7 +212,8 @@ class XMLGenerator:
         total = Decimal(str(self.operation.total_amount))
         entero = int(total)
         decimales = int((total - entero) * 100)
-
+        # Determinar la moneda
+        currency_name = "SOLES" if self.operation.currency == "PEN" else "DÓLARES AMERICANOS"
         # Convertir número a palabras básico
         if entero == 118:
             palabra = "CIENTO DIECIOCHO"
@@ -221,7 +222,7 @@ class XMLGenerator:
         else:
             palabra = str(entero)
 
-        return f"{palabra} CON {decimales:02d}/100 SOLES"
+        return f"{palabra} CON {decimales:02d}/100 {currency_name}"
 
     def _build_document_type_code(self, document_code):
         """Construir código de tipo de documento"""
@@ -264,16 +265,16 @@ class XMLGenerator:
     <cac:PartyLegalEntity>
     <cbc:RegistrationName>{self.company.denomination}</cbc:RegistrationName>
     <cac:RegistrationAddress>
-    <cbc:ID schemeName="Ubigeos" schemeAgencyName="PE:INEI">040101</cbc:ID>
-    <cbc:AddressTypeCode listAgencyName="PE:SUNAT" listName="Establecimientos anexos">0000</cbc:AddressTypeCode>
-    <cbc:CityName>AREQUIPA</cbc:CityName>
-    <cbc:CountrySubentity>AREQUIPA</cbc:CountrySubentity>
-    <cbc:District>AREQUIPA</cbc:District>
+    <cbc:ID schemeName="Ubigeos" schemeAgencyName="PE:INEI">{self.company.ubigeo}</cbc:ID>
+    <cbc:AddressTypeCode listAgencyName="PE:SUNAT" listName="Establecimientos anexos">{self.company.establishment_code}</cbc:AddressTypeCode>
+    <cbc:CityName>{self.company.province}</cbc:CityName>
+    <cbc:CountrySubentity>{self.company.department}</cbc:CountrySubentity>
+    <cbc:District>{self.company.district}</cbc:District>
     <cac:AddressLine>
     <cbc:Line>{self.company.address}</cbc:Line>
     </cac:AddressLine>
     <cac:Country>
-    <cbc:IdentificationCode listID="ISO 3166-1" listAgencyName="United Nations Economic Commission for Europe" listName="Country">PE</cbc:IdentificationCode>
+    <cbc:IdentificationCode listID="ISO 3166-1" listAgencyName="United Nations Economic Commission for Europe" listName="Country">{self.company.country_code}</cbc:IdentificationCode>
     </cac:Country>
     </cac:RegistrationAddress>
     </cac:PartyLegalEntity>
@@ -1260,6 +1261,16 @@ class BillingService:
         """Validar datos necesarios para facturación"""
         if not self.company.ruc:
             raise ValueError("RUC de empresa requerido")
+
+        # Validar nuevos campos de ubicación
+        if not hasattr(self.company, 'ubigeo') or not self.company.ubigeo:
+            raise ValueError("Ubigeo de empresa requerido")
+
+        if not hasattr(self.company, 'department') or not self.company.department:
+            raise ValueError("Departamento de empresa requerido")
+
+        if not hasattr(self.company, 'establishment_code') or not self.company.establishment_code:
+            raise ValueError("Código de establecimiento requerido")
 
         # Para BETA no validar credenciales SUNAT
         if self.company.environment != 'BETA':

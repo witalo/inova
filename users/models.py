@@ -33,8 +33,49 @@ class Company(models.Model):
     is_active = models.BooleanField('Activo', default=True)
     is_payment = models.BooleanField('Activar Pago', default=False)
     is_billing = models.BooleanField('Activar Facturacion', default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+
+    # NUEVOS CAMPOS MÍNIMOS NECESARIOS
+    ubigeo = models.CharField(
+        'Ubigeo',
+        max_length=6,
+        default='040101',
+        help_text='Código de ubigeo según INEI (ej: 040101)'
+    )
+
+    department = models.CharField(
+        'Departamento',
+        max_length=100,
+        default='AREQUIPA',
+        help_text='Nombre del departamento'
+    )
+
+    province = models.CharField(
+        'Provincia',
+        max_length=100,
+        default='AREQUIPA',
+        help_text='Nombre de la provincia'
+    )
+
+    district = models.CharField(
+        'Distrito',
+        max_length=150,
+        default='AREQUIPA',
+        help_text='Nombre del distrito'
+    )
+
+    country_code = models.CharField(
+        'Código de País',
+        max_length=2,
+        default='PE',
+        help_text='Código ISO 3166-1 del país (PE)'
+    )
+
+    establishment_code = models.CharField(
+        'Código de Establecimiento',
+        max_length=4,
+        default='0000',
+        help_text='Código de establecimiento SUNAT'
+    )
 
     # Configuración SUNAT
     environment = models.CharField(
@@ -59,6 +100,9 @@ class Company(models.Model):
     # Configuración adicional
     max_retry_attempts = models.IntegerField('Máximo Intentos', default=5)
     retry_interval_minutes = models.IntegerField('Intervalo Reintentos (min)', default=30)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def set_password(self, raw_password):
         """Encripta y guarda la contraseña"""

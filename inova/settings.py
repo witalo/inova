@@ -52,7 +52,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'graphene_django',
     'corsheaders',
-    'graphql_jwt.refresh_token.apps.RefreshTokenConfig',
+    # 'graphql_jwt.refresh_token.apps.RefreshTokenConfig',
     'operations',
     'finances',
     'products',
@@ -60,8 +60,10 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    # 'operations.middleware.DebugGraphQLMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -71,6 +73,14 @@ MIDDLEWARE = [
     # Middleware para logging de facturación
     'operations.middleware.BillingLoggingMiddleware',
 ]
+# Configuración de WhiteNoise (opcional pero recomendado)
+WHITENOISE_AUTOREFRESH = DEBUG  # Solo en desarrollo
+WHITENOISE_USE_FINDERS = DEBUG  # Solo en desarrollo
+WHITENOISE_COMPRESS_OFFLINE = not DEBUG  # Comprimir en producción
+
+# Si usas WhiteNoise 6.0+
+if not DEBUG:
+    STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 ROOT_URLCONF = 'inova.urls'
 
@@ -109,11 +119,11 @@ AUTHENTICATION_BACKENDS = [
 GRAPHQL_JWT = {
     'JWT_VERIFY_EXPIRATION': True,
     'JWT_EXPIRATION_DELTA': timedelta(hours=24),
-    'JWT_REFRESH_EXPIRATION_DELTA': timedelta(days=7),
-    'JWT_LONG_RUNNING_REFRESH_TOKEN': True,
-    'JWT_ALLOW_REFRESH': True,
+    # 'JWT_REFRESH_EXPIRATION_DELTA': timedelta(days=7),
+    'JWT_LONG_RUNNING_REFRESH_TOKEN': False,
+    'JWT_ALLOW_REFRESH': False,
     'JWT_AUTH_HEADER_PREFIX': 'Bearer',
-    'JWT_REFRESH_TOKEN_N_BYTES': 20,
+    # 'JWT_REFRESH_TOKEN_N_BYTES': 20,
     'JWT_ALGORITHM': 'HS256',
     'JWT_SECRET_KEY': SECRET_KEY,
 }
@@ -228,17 +238,28 @@ TIME_ZONE = 'America/Lima'
 USE_I18N = True
 USE_TZ = True
 DEFAULT_CHARSET = 'utf-8'
+# ================================
+# CONFIGURACIÓN DE ARCHIVOS ESTÁTICOS Y MEDIA
+# ================================
 
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
-STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, "static"),
-]
 
-# Media files
+# Media files - CONFIGURACIÓN CRÍTICA PARA PRODUCCIÓN
 MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media/')
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# # Static files (CSS, JavaScript, Images)
+# STATIC_URL = '/static/'
+# STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+# STATICFILES_DIRS = [
+#     os.path.join(BASE_DIR, "static"),
+# ]
+#
+# # Media files
+# MEDIA_URL = '/media/'
+# MEDIA_ROOT = os.path.join(BASE_DIR, 'media/')
 
 # ================================
 # 🔥 CONFIGURACIÓN CELERY INTELIGENTE
@@ -503,7 +524,8 @@ CACHES = {
 # CONFIGURACIÓN DE SESIONES
 # ================================
 
-SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+# SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_CACHE_ALIAS = 'default'
 SESSION_COOKIE_AGE = 86400  # 24 horas
 

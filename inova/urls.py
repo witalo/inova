@@ -19,13 +19,22 @@ from django.urls import path
 from django.views.decorators.csrf import csrf_exempt
 from graphene_django.views import GraphQLView
 from django.conf.urls.static import static
+from django.urls import path, re_path
 from inova.schema import schema
 from inova import settings
+from operations.views import download_billing_file, serve_protected_media, download_operation_file
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("graphql", csrf_exempt(GraphQLView.as_view(graphiql=True, schema=schema))),
+    # URLs para descarga de archivos
+    path('download/<str:file_type>/<str:filename>/', download_billing_file, name='download_billing'),
+    path('download/operation/<int:operation_id>/<str:file_type>/', download_operation_file, name='download_operation'),
+
+    # URL general para servir archivos media
+    re_path(r'^media/(?P<path>.*)$', serve_protected_media, name='media'),
 ]
 # ✅ Agregar soporte para archivos estáticos y multimedia
-urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
-urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# IMPORTANTE: Esta configuración funciona tanto en desarrollo como en producción
+if settings.DEBUG:
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

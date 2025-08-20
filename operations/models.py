@@ -1,7 +1,11 @@
+import os
+
 from django.db import models
 
-
 # Create your models here.
+from inova import settings
+
+
 class Document(models.Model):
     id = models.AutoField(primary_key=True)
     code = models.CharField(max_length=15, null=True, blank=True)
@@ -139,6 +143,7 @@ class Operation(models.Model):
     cancellation_ticket = models.CharField('Ticket Anulación', max_length=100, null=True, blank=True)
     cancellation_date = models.DateField('Fecha Anulación', null=True, blank=True)
     cancellation_xml_path = models.CharField('Ruta XML anulación', max_length=800, null=True, blank=True)
+    cancellation_signed_xml_path = models.CharField('Ruta XML Firmado de anulación', max_length=800, null=True, blank=True)
     cancellation_cdr_path = models.CharField(
         'Ruta CDR anulación',
         max_length=800,
@@ -156,6 +161,57 @@ class Operation(models.Model):
                 name='unique_operation'
             )
         ]
+
+    # ========================================
+    # PROPIEDADES PARA URLs DE DESCARGA
+    # ========================================
+    @property
+    def xml_download_url(self):
+        """URL para descargar XML"""
+        if self.xml_file_path:
+            filename = os.path.basename(self.xml_file_path)
+            return f"/download/xml/{filename}/"
+        return None
+
+    @property
+    def signed_xml_download_url(self):
+        """URL para descargar XML firmado"""
+        if self.signed_xml_file_path:
+            filename = os.path.basename(self.signed_xml_file_path)
+            return f"/download/signed/{filename}/"
+        return None
+
+    @property
+    def cdr_download_url(self):
+        """URL para descargar CDR"""
+        if self.cdr_file_path:
+            filename = os.path.basename(self.cdr_file_path)
+            return f"/download/cdr/{filename}/"
+        return None
+
+    @property
+    def cancellation_xml_download_url(self):
+        """URL para descargar XML de anulación"""
+        if self.cancellation_xml_path:
+            filename = os.path.basename(self.cancellation_xml_path)
+            return f"/download/cancellation_xml/{filename}/"
+        return None
+
+    @property
+    def cancellation_signed_xml_download_url(self):
+        """URL para descargar XML firmado de anulación"""
+        if self.cancellation_signed_xml_path:
+            filename = os.path.basename(self.cancellation_signed_xml_path)
+            return f"/download/cancellation_signed/{filename}/"
+        return None
+
+    @property
+    def cancellation_cdr_download_url(self):
+        """URL para descargar CDR de anulación"""
+        if self.cancellation_cdr_path:
+            filename = os.path.basename(self.cancellation_cdr_path)
+            return f"/download/cancellation_cdr/{filename}/"
+        return None
 
     def __str__(self):
         return f"{self.serial}-{self.number}"
