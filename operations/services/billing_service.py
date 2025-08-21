@@ -36,11 +36,10 @@ class BillingFileManager:
             'FIRMA',
             'CDR',
             'PDF',
-            'QR',
             'CERTIFICADOS/BETA',
             'CERTIFICADOS/PRODUCTION',
             'LOGS',
-            'TEMP',
+            # 'TEMP',
             'BAJA/XML',
             'BAJA/FIRMA',
             'BAJA/CDR',
@@ -280,29 +279,6 @@ class XMLGenerator:
     </cac:PartyLegalEntity>
     </cac:Party>
     </cac:AccountingSupplierParty>'''
-
-    # def _build_customer_party(self):
-    #     """Construir datos del cliente SIN CDATA"""
-    #     person = self.operation.person
-    #     document_length = len(person.document)
-    #
-    #     if document_length == 8:
-    #         doc_type = '1'
-    #     elif document_length == 11:
-    #         doc_type = '6'
-    #     else:
-    #         doc_type = person.person_type
-    #
-    #     return f'''<cac:AccountingCustomerParty>
-    # <cac:Party>
-    # <cac:PartyIdentification>
-    # <cbc:ID schemeID="{doc_type}" schemeName="Documento de Identidad" schemeAgencyName="PE:SUNAT" schemeURI="urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo06">{person.document}</cbc:ID>
-    # </cac:PartyIdentification>
-    # <cac:PartyLegalEntity>
-    # <cbc:RegistrationName>{person.full_name}</cbc:RegistrationName>
-    # </cac:PartyLegalEntity>
-    # </cac:Party>
-    # </cac:AccountingCustomerParty>'''
 
     def _build_customer_party(self):
         """Construir datos del cliente SIN CDATA"""
