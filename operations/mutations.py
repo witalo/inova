@@ -298,7 +298,7 @@ class CreateOperation(graphene.Mutation):
                         paid_amount=paid_amount
                     )
                     total_paid += paid_amount
-
+            message = f'Operación creada exitosamente'
             # Convertir ambos valores a Decimal
             total_paid_decimal = Decimal(str(total_paid))
             operation_total_decimal = Decimal(str(operation.total_amount))
@@ -320,18 +320,21 @@ class CreateOperation(graphene.Mutation):
                     operation.billing_status = 'PENDING'
                     operation.save()
 
-                    try:
-                        from operations.tasks import process_electronic_billing_task
+                    def enqueue_billing_task():
+                        try:
+                            from operations.tasks import process_electronic_billing_task
 
-                        # SOLO ENCOLAR - NO VERIFICAR NADA MÁS
-                        result = process_electronic_billing_task.delay(operation.id)
-                        task_id = str(result.id) if result else None
+                            # SOLO ENCOLAR - NO VERIFICAR NADA MÁS
+                            result = process_electronic_billing_task.delay(operation.id)
+                            task_id = str(result.id) if result else None
 
-                        print(f"✅ Tarea encolada: {task_id}")
-                        message = f'Operación creada. Facturación en proceso (Task: {task_id})'
-                    except Exception as e:
-                        print(f"❌ Error: {str(e)}")
-                        message = 'Operación creada. Facturación pendiente'
+                            print(f"✅ Tarea encolada: {task_id}")
+                            message = f'Operación creada. Facturación en proceso (Task: {task_id})'
+                        except Exception as e:
+                            print(f"❌ Error: {str(e)}")
+                            message = 'Operación creada. Facturación pendiente'
+                    # Ejecutar después del commit
+                    transaction.on_commit(enqueue_billing_task)
                 else:
                     message = 'Operación creada exitosamente'
             else:
