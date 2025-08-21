@@ -482,7 +482,6 @@ class CancelOperation(graphene.Mutation):
     class Arguments:
         operation_id = graphene.ID(required=True)
         cancellation_reason = graphene.String(default_value='01')
-        cancellation_description = graphene.String(default_value='Anulación de la operación')
 
     success = graphene.Boolean()
     message = graphene.String()
@@ -490,56 +489,58 @@ class CancelOperation(graphene.Mutation):
     task_id = graphene.String()
     cancellation_mode = graphene.String()
 
-    def mutate(self, info, operation_id, cancellation_reason='01',
-               cancellation_description='Anulación de la operación'):
+    def mutate(self, info, operation_id, cancellation_reason='01'):
         try:
             from operations.models import Operation
 
             operation = Operation.objects.get(id=operation_id)
 
-            # Validar estado
-            if operation.billing_status not in ['ACCEPTED', 'ACCEPTED_WITH_OBSERVATIONS']:
-                return CancelOperation(
-                    success=False,
-                    message=f'Solo se pueden anular documentos aceptados. Estado actual: {operation.billing_status}',
-                    operation=operation,
-                    task_id=None
-                )
-
+            # Buscar la descripción desde los choices del modelo
+            reason_dict = dict(Operation._meta.get_field("cancellation_reason").choices)
+            cancellation_description = reason_dict.get(cancellation_reason, "Motivo desconocido")
             # Guardar datos de anulación
             operation.cancellation_reason = cancellation_reason
             operation.cancellation_description = cancellation_description
             operation.cancellation_date = get_peru_date()
-            operation.billing_status = 'PROCESSING_CANCELLATION'
-            operation.save()
-
             task_id = None
+            message = "-"
+            if operation.billing_status == "REGISTER":
+                operation.billing_status = 'CANCELLED'
+                operation.save()
+                message = f'Operacion anulada con exito'
+            elif operation.billing_status in ['ACCEPTED', 'ACCEPTED_WITH_OBSERVATIONS']:
+                operation.billing_status = 'PROCESSING_CANCELLATION'
+                operation.save()
+                try:
+                    from operations.tasks import cancel_document_task
 
-            try:
-                from operations.tasks import cancel_document_task
+                    # SOLO ENCOLAR - SIMPLE
+                    result = cancel_document_task.delay(
+                        operation_id,
+                        cancellation_reason,
+                        cancellation_description
+                    )
+                    task_id = str(result.id) if result else None
 
-                # SOLO ENCOLAR - SIMPLE
-                result = cancel_document_task.delay(
-                    operation_id,
-                    cancellation_reason,
-                    cancellation_description
+                    print(f"✅ Anulación encolada: {task_id}")
+                    message = f'Proceso de anulación iniciado (Task: {task_id})'
+
+                except Exception as e:
+                    print(f"❌ Error: {str(e)}")
+                    message = 'Anulación pendiente de procesamiento'
+            else:
+                return CancelOperation(
+                    success=False,
+                    message=f'Solo se pueden anular documentos aceptados. Estado actual: {operation.billing_status}',
+                    operation=operation,
+                    task_id=task_id
                 )
-                task_id = str(result.id) if result else None
-
-                print(f"✅ Anulación encolada: {task_id}")
-                message = f'Proceso de anulación iniciado (Task: {task_id})'
-
-            except Exception as e:
-                print(f"❌ Error: {str(e)}")
-                message = 'Anulación pendiente de procesamiento'
-
             return CancelOperation(
                 success=True,
                 message=message,
                 operation=operation,
                 task_id=task_id
             )
-
         except Operation.DoesNotExist:
             return CancelOperation(
                 success=False,
@@ -554,93 +555,6 @@ class CancelOperation(graphene.Mutation):
                 operation=None,
                 task_id=None
             )
-        # try:
-        #     from operations.models import Operation
-        #
-        #     operation = Operation.objects.get(id=operation_id)
-        #
-        #     # Validar que se puede anular
-        #     if operation.billing_status not in ['ACCEPTED', 'ACCEPTED_WITH_OBSERVATIONS']:
-        #         return CancelOperation(
-        #             success=False,
-        #             message=f'Solo se pueden anular documentos aceptados. Estado actual: {operation.billing_status}',
-        #             operation=operation,
-        #             task_id=None
-        #         )
-        #     # Guardar información de anulación
-        #     operation.cancellation_reason = cancellation_reason
-        #     operation.cancellation_description = cancellation_description
-        #     operation.cancellation_date = get_peru_date()
-        #     # operation.billing_status = 'PROCESSING_CANCELLATION'
-        #     operation.save()
-        #     task_id = None
-        #     try:
-        #         # Importar y lanzar tarea asíncrona
-        #         from operations.tasks import cancel_document_task
-        #
-        #         task = cancel_document_task.delay(
-        #             operation_id,
-        #             cancellation_reason,
-        #             cancellation_description
-        #         )
-        #
-        #         task_id = str(task.id)
-        #         logger.info(f"Tarea de anulación lanzada - Task ID: {task_id} para operación {operation_id}")
-        #
-        #         return CancelOperation(
-        #             success=True,
-        #             message=f'Proceso de anulación iniciado. Task ID: {task_id}',
-        #             operation=operation,
-        #             task_id=task_id
-        #         )
-        #     except ImportError as e:
-        #         # Si Celery no está disponible, ejecutar sincrónicamente
-        #         logger.warning(f"️ Celery no disponible para anulación: {str(e)}")
-        #
-        #         try:
-        #             from operations.services.cancellation_service import CancellationService
-        #
-        #             cancellation_service = CancellationService(operation)
-        #             success = cancellation_service.cancel_document(cancellation_reason, cancellation_description)
-        #
-        #             if success:
-        #                 return CancelOperation(
-        #                     success=True,
-        #                     message='Documento anulado exitosamente.',
-        #                     operation=operation,
-        #                     task_id=None
-        #                 )
-        #             else:
-        #                 return CancelOperation(
-        #                     success=False,
-        #                     message='Error en el proceso de anulación.',
-        #                     operation=operation,
-        #                     task_id=None
-        #                 )
-        #
-        #         except Exception as cancel_error:
-        #             logger.error(f"Error en anulación síncrona: {str(cancel_error)}")
-        #             return CancelOperation(
-        #                 success=False,
-        #                 message=f'Error en anulación: {str(cancel_error)}',
-        #                 operation=operation,
-        #                 task_id=None
-        #             )
-        # except Operation.DoesNotExist:
-        #     return CancelOperation(
-        #         success=False,
-        #         message='Operación no encontrada',
-        #         operation=None,
-        #         task_id=None
-        #     )
-        # except Exception as e:
-        #     logger.error(f"Error en anulación: {str(e)}", exc_info=True)
-        #     return CancelOperation(
-        #         success=False,
-        #         message=f'Error: {str(e)}',
-        #         operation=None,
-        #         task_id=None
-        #     )
 
 
 class CheckTaskStatus(graphene.Mutation):

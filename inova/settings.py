@@ -37,7 +37,7 @@ else:
     print("🚀 MODO: PRODUCCIÓN (DEBUG=False)")
     print("=" * 80)
     # En producción: más restrictivo, siempre asíncrono
-    ALLOWED_HOSTS = ['tu-dominio.com', 'www.tu-dominio.com', 'localhost', '192.168.1.245']
+    ALLOWED_HOSTS = ['*']
     ALLOW_HTTP_IN_PRODUCTION = True
     # Celery SIEMPRE asíncrono en producción
     USE_CELERY_ASYNC = True  # ⬅️ SIEMPRE True en producción

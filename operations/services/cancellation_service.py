@@ -216,7 +216,7 @@ class CancellationService:
 
     def _generate_summary_xml(self, reason_code, description):
         """Generar XML de Resumen Diario (para Boletas) - CORREGIDO"""
-        current_date = timezone.now().date()
+        current_date = get_peru_date()
         correlative = self._get_next_cancellation_correlative('RC')
 
         filename = f"{self.company.ruc}-RC-{current_date.strftime('%Y%m%d')}-{correlative:05d}"
