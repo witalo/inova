@@ -11,5 +11,5 @@ inova/settings.py
 migrations
 .idea
 /staticfiles
-#mediafiles
-#media
+mediafiles
+media
