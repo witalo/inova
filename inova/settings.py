@@ -190,8 +190,8 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': os.environ.get('DB_NAME', 'inova'),
-        'USER': os.environ.get('DB_USER', 'root'),
-        'PASSWORD': os.environ.get('DB_PASSWORD', 'italo'),
+        'USER': os.environ.get('DB_USER', 'ventura'),
+        'PASSWORD': os.environ.get('DB_PASSWORD', 'ventura12345.*/'),
         'HOST': os.environ.get('DB_HOST', 'localhost'),
         'PORT': os.environ.get('DB_PORT', '3306'),
         'OPTIONS': {
@@ -202,14 +202,16 @@ DATABASES = {
 
 # CSRF Configuration
 CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:3000",
-    "https://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://127.0.0.1:3000",
-    "http://localhost:8000",
-    "https://localhost:8000",
+    "http://localhost:3002",
+    "https://localhost:3002",
+    "http://127.0.0.1:3002",
+    "https://127.0.0.1:3002",
+    "http://localhost:3002",
+    "https://localhost:3002",
     "http://192.168.1.245:8000",
     "https://192.168.1.245:8000",
+    "http://190.119.143.147:3002",
+    "https://190.119.143.147:3002",
 ]
 
 APPEND_SLASH = False
