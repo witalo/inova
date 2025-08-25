@@ -61,10 +61,9 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    # 'operations.middleware.DebugGraphQLMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # ⬅️ DEBE ESTAR SEGUNDO
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -463,7 +462,7 @@ LOGGING = {
             'backupCount': 5,
             'formatter': 'verbose',
             'encoding': 'utf-8',  # ← AGREGADO
-            'delay': False,       # ← AGREGADO
+            'delay': False,  # ← AGREGADO
         },
         'file_billing': {
             'level': 'DEBUG',  # ← CAMBIADO A DEBUG PARA VER TODO
@@ -473,7 +472,7 @@ LOGGING = {
             'backupCount': 10,
             'formatter': 'billing',
             'encoding': 'utf-8',  # ← AGREGADO
-            'delay': False,       # ← AGREGADO
+            'delay': False,  # ← AGREGADO
         },
         'file_celery': {
             'level': 'DEBUG',  # ← CAMBIADO A DEBUG
@@ -483,7 +482,7 @@ LOGGING = {
             'backupCount': 5,
             'formatter': 'celery_format',
             'encoding': 'utf-8',  # ← AGREGADO
-            'delay': False,       # ← AGREGADO
+            'delay': False,  # ← AGREGADO
         },
         'file_sunat': {
             'level': 'INFO',
@@ -493,7 +492,7 @@ LOGGING = {
             'backupCount': 10,
             'formatter': 'billing',
             'encoding': 'utf-8',  # ← AGREGADO
-            'delay': False,       # ← AGREGADO
+            'delay': False,  # ← AGREGADO
         },
     },
     'root': {
@@ -622,6 +621,7 @@ print(f"📍 Media Root: {MEDIA_ROOT}")
 # Verificar Redis
 try:
     import redis
+
     r = redis.Redis.from_url(CELERY_BROKER_URL)
     r.ping()
     print(f"📍 Redis: ✅ Conectado en {CELERY_BROKER_URL}")
@@ -640,3 +640,8 @@ else:
     print("  Las tareas se ejecutarán inmediatamente (puede ser lento)")
 
 print("=" * 80)
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+WHITENOISE_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+WHITENOISE_MAX_AGE = 31536000  # 1 año de cache
+WHITENOISE_USE_FINDERS = False
+WHITENOISE_AUTOREFRESH = False
