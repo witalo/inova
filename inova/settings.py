@@ -116,18 +116,27 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 # JWT Configuration
+# GRAPHQL_JWT = {
+#     'JWT_VERIFY_EXPIRATION': True,
+#     'JWT_EXPIRATION_DELTA': timedelta(hours=24),
+#     # 'JWT_REFRESH_EXPIRATION_DELTA': timedelta(days=7),
+#     'JWT_LONG_RUNNING_REFRESH_TOKEN': False,
+#     'JWT_ALLOW_REFRESH': False,
+#     'JWT_AUTH_HEADER_PREFIX': 'Bearer',
+#     # 'JWT_REFRESH_TOKEN_N_BYTES': 20,
+#     'JWT_ALGORITHM': 'HS256',
+#     'JWT_SECRET_KEY': SECRET_KEY,
+# }
 GRAPHQL_JWT = {
     'JWT_VERIFY_EXPIRATION': True,
-    'JWT_EXPIRATION_DELTA': timedelta(hours=24),
-    # 'JWT_REFRESH_EXPIRATION_DELTA': timedelta(days=7),
-    'JWT_LONG_RUNNING_REFRESH_TOKEN': False,
-    'JWT_ALLOW_REFRESH': False,
+    'JWT_EXPIRATION_DELTA': timedelta(minutes=30),
+    'JWT_REFRESH_EXPIRATION_DELTA': timedelta(days=7),
+    'JWT_ALLOW_REFRESH': True,
+    'JWT_LONG_RUNNING_REFRESH_TOKEN': True,
     'JWT_AUTH_HEADER_PREFIX': 'Bearer',
-    # 'JWT_REFRESH_TOKEN_N_BYTES': 20,
     'JWT_ALGORITHM': 'HS256',
     'JWT_SECRET_KEY': SECRET_KEY,
 }
-
 # CORS Configuration
 CORS_ALLOW_ALL_ORIGINS = DEBUG  # Solo permitir todos en desarrollo
 CORS_ALLOWED_ORIGINS = [
