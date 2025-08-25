@@ -2,6 +2,7 @@
 Django settings for inova project - PRODUCCIÓN CON HTTP Y HTTPS
 """
 import os
+import platform
 import sys
 from pathlib import Path
 from datetime import timedelta
@@ -266,14 +267,66 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # ================================
 
 # Configuración base de Celery
+# CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+# CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+# CELERY_ACCEPT_CONTENT = ['json']
+# CELERY_TASK_SERIALIZER = 'json'
+# CELERY_RESULT_SERIALIZER = 'json'
+# CELERY_TIMEZONE = TIME_ZONE
+# CELERY_ENABLE_UTC = True
+# URLs con timeout reducido para evitar el delay de 20 segundos
+# Configuración base de Celery
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+
+# Configuración de serialización
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_ENABLE_UTC = True
 
+# Configuración de conexión
+CELERY_BROKER_CONNECTION_RETRY = True
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_BROKER_CONNECTION_MAX_RETRIES = 2
+CELERY_BROKER_POOL_LIMIT = 10
+
+# Timeouts de Redis
+CELERY_REDIS_SOCKET_CONNECT_TIMEOUT = 2
+CELERY_REDIS_SOCKET_TIMEOUT = 2
+CELERY_REDIS_MAX_CONNECTIONS = 10
+
+# ⚡ MANTENER WORKERS DESPIERTOS
+CELERY_WORKER_POOL_RESTARTS = True
+CELERY_BROKER_HEARTBEAT = 30
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_TASK_ACKS_LATE = True
+CELERY_WORKER_MAX_TASKS_PER_CHILD = 100
+
+# Detectar sistema operativo para configuraciones específicas
+IS_WINDOWS = platform.system() == 'Windows'
+
+if IS_WINDOWS:
+    # Configuración específica para Windows
+    print("📍 Sistema: Windows - Configuración adaptada")
+    # Windows funciona mejor con solo o threads
+    CELERY_WORKER_POOL = 'solo'
+else:
+    # Configuración para Linux/Debian
+    print("📍 Sistema: Linux/Unix - Configuración optimizada")
+    # Linux puede usar prefork para mejor rendimiento
+    CELERY_WORKER_POOL = 'prefork'
+    CELERY_WORKER_CONCURRENCY = 4
+
+# Comando de Celery recomendado según el sistema
+if IS_WINDOWS:
+    CELERY_COMMAND = "celery -A inova worker -l INFO --pool=solo --without-gossip --without-mingle"
+else:
+    CELERY_COMMAND = "celery -A inova worker -l INFO --pool=prefork --concurrency=4 --without-gossip --without-mingle"
+
+# Mostrar comando recomendado al iniciar
+print(f"📍 Comando Celery recomendado: {CELERY_COMMAND}")
 # ⚡ CONFIGURACIÓN CRÍTICA DE CELERY
 if USE_CELERY_ASYNC:
     # MODO ASÍNCRONO (Producción o desarrollo con Celery)
@@ -578,7 +631,8 @@ print("=" * 80)
 # Mensaje de instrucciones según el modo
 if USE_CELERY_ASYNC:
     print(" IMPORTANTE: Debes iniciar Celery Worker:")
-    print(" celery -A inova worker -l INFO -P solo -Q billing,celery")
+    # print(" celery -A inova worker -l INFO -P solo -Q billing,celery")
+    # print(" celery -A inova worker -l INFO --pool=solo --without-gossip --without-mingle")
 else:
     print("  Modo síncrono activo - No necesitas Celery Worker")
     print("  Las tareas se ejecutarán inmediatamente (puede ser lento)")

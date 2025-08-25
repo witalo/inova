@@ -314,32 +314,56 @@ class CreateOperation(graphene.Mutation):
             task_id = None
 
             # Verificar si necesita facturación
+            # if auto_billing and operation_type == 'S' and company.is_billing:
+            #     if operation.document and operation.document.code in ['01', '03', '07', '08']:
+            #         # Marcar como pendiente
+            #         operation.billing_status = 'PENDING'
+            #         operation.save()
+            #
+            #         def enqueue_billing_task():
+            #             try:
+            #                 from operations.tasks import process_electronic_billing_task
+            #
+            #                 # SOLO ENCOLAR - NO VERIFICAR NADA MÁS
+            #                 result = process_electronic_billing_task.delay(operation.id)
+            #                 task_id = str(result.id) if result else None
+            #
+            #                 print(f"✅ Tarea encolada: {task_id}")
+            #                 message = f'Operación creada. Facturación en proceso (Task: {task_id})'
+            #             except Exception as e:
+            #                 print(f"❌ Error: {str(e)}")
+            #                 message = 'Operación creada. Facturación pendiente'
+            #         # Ejecutar después del commit
+            #         transaction.on_commit(enqueue_billing_task)
+            #     else:
+            #         message = 'Operación creada exitosamente'
+            # else:
+            #     message = 'Operación creada exitosamente'
             if auto_billing and operation_type == 'S' and company.is_billing:
                 if operation.document and operation.document.code in ['01', '03', '07', '08']:
-                    # Marcar como pendiente
                     operation.billing_status = 'PENDING'
                     operation.save()
 
-                    def enqueue_billing_task():
+                    import threading
+
+                    def enqueue_task_async(op_id):
                         try:
                             from operations.tasks import process_electronic_billing_task
-
-                            # SOLO ENCOLAR - NO VERIFICAR NADA MÁS
-                            result = process_electronic_billing_task.delay(operation.id)
-                            task_id = str(result.id) if result else None
-
-                            print(f"✅ Tarea encolada: {task_id}")
-                            message = f'Operación creada. Facturación en proceso (Task: {task_id})'
+                            process_electronic_billing_task.delay(op_id)
+                            print(f"Tarea encolada para operación {op_id}")
                         except Exception as e:
-                            print(f"❌ Error: {str(e)}")
-                            message = 'Operación creada. Facturación pendiente'
-                    # Ejecutar después del commit
-                    transaction.on_commit(enqueue_billing_task)
+                            print(f"Error encolando tarea: {e}")
+
+                    thread = threading.Thread(target=enqueue_task_async, args=[operation.id])
+                    thread.daemon = True
+                    thread.start()
+
+                    message = 'Operación creada. Facturación en proceso'
+                    task_id = "pending"
                 else:
                     message = 'Operación creada exitosamente'
             else:
                 message = 'Operación creada exitosamente'
-
             return CreateOperation(
                 operation=operation,
                 success=True,
