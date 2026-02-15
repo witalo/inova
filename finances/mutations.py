@@ -185,3 +185,52 @@ class DeletePayment(graphene.Mutation):
                 success=False,
                 message=str(e)
             )
+
+
+class CancelPayment(graphene.Mutation):
+    """
+    Anula un pago (estado cancelado, is_enabled=False).
+    Sigue visible en listas pero ya no se contabiliza en totales ni en movimiento de caja.
+    """
+    class Arguments:
+        id = graphene.Int(required=True)
+
+    success = graphene.Boolean()
+    message = graphene.String()
+    payment = graphene.Field(PaymentType)
+
+    def mutate(self, info, id):
+        try:
+            user = info.context.user
+            if not user.is_authenticated:
+                raise Exception("Usuario no autenticado")
+
+            payment = Payment.objects.get(pk=id)
+            if not payment.is_enabled:
+                return CancelPayment(
+                    success=False,
+                    message="El pago ya está anulado",
+                    payment=payment
+                )
+
+            payment.status = 'C'  # CANCELADO
+            payment.is_enabled = False
+            payment.save()
+
+            return CancelPayment(
+                success=True,
+                message="Pago anulado correctamente",
+                payment=payment
+            )
+        except Payment.DoesNotExist:
+            return CancelPayment(
+                success=False,
+                message="Pago no encontrado",
+                payment=None
+            )
+        except Exception as e:
+            return CancelPayment(
+                success=False,
+                message=str(e),
+                payment=None
+            )

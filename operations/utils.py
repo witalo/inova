@@ -78,3 +78,17 @@ class ErrorCodes:
     def get_error_description(cls, code):
         """Obtener descripción de código de error"""
         return cls.SUNAT_ERRORS.get(str(code), f'Error desconocido: {code}')
+
+
+def cancel_payments_for_operation(operation):
+    """
+    Anula todos los pagos asociados a una operación (venta anulada).
+    Pone status='C' (CANCELADO) e is_enabled=False para que no se contabilicen
+    en totales ni en movimiento de caja, pero sigan visibles en listas.
+    """
+    from finances.models import Payment
+    updated = Payment.objects.filter(operation_id=operation.id).update(
+        status='C',
+        is_enabled=False
+    )
+    return updated

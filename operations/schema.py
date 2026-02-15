@@ -1046,12 +1046,11 @@ class OperationsQuery(graphene.ObjectType):
         # 4. PAYMENT METHODS
         payment_methods = []
         try:
-            # Filtrar pagos de las operaciones de venta (S) del mes
+            # Filtrar pagos de ventas del mes: solo activos (is_enabled=True); anulados no suman
             payments = Payment.objects.filter(
                 operation__in=operations.filter(operation_type='S'),
-                status='C',  # Solo pagos cancelados (completados)
-                type='I',  # Solo ingresos (pagos recibidos)
-                is_enabled=True  # Solo pagos habilitados
+                type='I',  # Solo ingresos
+                is_enabled=True
             ).values('payment_method').annotate(
                 count=Count('id'),
                 total=Sum('paid_amount')

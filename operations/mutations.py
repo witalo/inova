@@ -20,6 +20,10 @@ from users.models import Company, User
 logger = logging.getLogger('operations.tasks')
 peru_tz = pytz.timezone('America/Lima')
 
+# Códigos de documentos que se envían a SUNAT (anulación también va a SUNAT).
+# Nota de venta y otros comprobantes internos NO están aquí → se anulan solo en local.
+DOCUMENT_CODES_SUNAT = ('01', '03', '07', '08')  # Factura, Boleta, Nota crédito, Nota débito
+
 
 class PersonMutation(graphene.Mutation):
     class Arguments:
@@ -519,21 +523,42 @@ class CancelOperation(graphene.Mutation):
     def mutate(self, info, operation_id, cancellation_reason='01'):
         try:
             from operations.models import Operation
+            from operations.utils import cancel_payments_for_operation
 
             operation = Operation.objects.get(id=operation_id)
 
             # Buscar la descripción desde los choices del modelo
             reason_dict = dict(Operation._meta.get_field("cancellation_reason").choices)
             cancellation_description = reason_dict.get(cancellation_reason, "Motivo desconocido")
-            # Guardar datos de anulación
             operation.cancellation_reason = cancellation_reason
             operation.cancellation_description = cancellation_description
             operation.cancellation_date = get_peru_date()
+
             task_id = None
             message = "-"
-            if operation.billing_status == "REGISTER":
+            doc_code = (operation.document.code if operation.document else None) or ""
+
+            # Documentos que NO van a SUNAT (ej. nota de venta): anulación solo local, sin enviar nada
+            is_sunat_document = doc_code in DOCUMENT_CODES_SUNAT
+
+            if not is_sunat_document:
+                # Nota de venta u otro comprobante interno: anular directo, sin SUNAT
                 operation.billing_status = 'CANCELLED'
                 operation.save()
+                cancel_payments_for_operation(operation)
+                return CancelOperation(
+                    success=True,
+                    message='Operación anulada (comprobante interno, sin envío a SUNAT).',
+                    operation=operation,
+                    task_id=None
+                )
+
+            # A partir de aquí: documento SUNAT (01, 03, 07, 08)
+            if operation.billing_status == "REGISTER":
+                # Nunca enviado a SUNAT: anular solo en local
+                operation.billing_status = 'CANCELLED'
+                operation.save()
+                cancel_payments_for_operation(operation)
                 message = f'Operacion anulada con exito'
             elif operation.billing_status in ['ACCEPTED', 'ACCEPTED_WITH_OBSERVATIONS']:
                 operation.billing_status = 'PROCESSING_CANCELLATION'
@@ -541,7 +566,6 @@ class CancelOperation(graphene.Mutation):
                 try:
                     from operations.tasks import cancel_document_task
 
-                    # SOLO ENCOLAR - SIMPLE
                     result = cancel_document_task.delay(
                         operation_id,
                         cancellation_reason,

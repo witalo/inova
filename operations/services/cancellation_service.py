@@ -45,35 +45,39 @@ class CancellationService:
         try:
             logger.info(f"=== INICIANDO ANULACIÓN ===")
             logger.info(f"Documento: {self.operation.serial}-{self.operation.number}")
-            logger.info(f"Tipo: {self.operation.document.code if self.operation.document else '03'}")
+            doc_type = self.operation.document.code if self.operation.document else ''
+            logger.info(f"Tipo: {doc_type}")
             logger.info(f"Estado actual: {self.operation.billing_status}")
 
-            # ⚠️ VALIDACIÓN MEJORADA: Permitir PROCESSING_CANCELLATION como estado válido
-            valid_states = ['ACCEPTED', 'ACCEPTED_WITH_OBSERVATIONS', 'PROCESSING_CANCELLATION']
+            # Solo 01, 03, 07, 08 van a SUNAT. Nota de venta y otros se anulan solo en local.
+            DOCUMENT_CODES_SUNAT = ('01', '03', '07', '08')
+            if doc_type not in DOCUMENT_CODES_SUNAT:
+                logger.info("Documento no es SUNAT (ej. nota de venta): anulación solo local, sin envío.")
+                self.operation.cancellation_reason = reason_code
+                self.operation.cancellation_description = description
+                self.operation.cancellation_date = get_peru_date()
+                self.operation.billing_status = 'CANCELLED'
+                self.operation.save()
+                from operations.utils import cancel_payments_for_operation
+                cancel_payments_for_operation(self.operation)
+                return True
 
+            # A partir de aquí: documento SUNAT (Factura, Boleta, NC, ND)
+            valid_states = ['ACCEPTED', 'ACCEPTED_WITH_OBSERVATIONS', 'PROCESSING_CANCELLATION']
             if self.operation.billing_status not in valid_states:
                 error_msg = f"Solo se pueden anular documentos aceptados por SUNAT. Estado actual: {self.operation.billing_status}"
                 logger.error(error_msg)
                 raise ValueError(error_msg)
-            # ⚠️ VALIDACIÓN MEJORADA: Verificar datos del cliente
             if not self.operation.person:
                 logger.warning("Operación sin persona asociada, usando datos por defecto para cliente varios")
 
-            # Determinar tipo de documento
-            doc_type = self.operation.document.code if self.operation.document else '03'
-
-            # Actualizar datos de anulación
             self.operation.cancellation_reason = reason_code
             self.operation.cancellation_description = description
             self.operation.cancellation_date = get_peru_date()
-
-            # Solo cambiar a PROCESSING_CANCELLATION si no está ya en ese estado
             if self.operation.billing_status != 'PROCESSING_CANCELLATION':
                 self.operation.billing_status = 'PROCESSING_CANCELLATION'
-
             self.operation.save()
 
-            # Determinar proceso según tipo de documento
             if doc_type in ['01', '07', '08']:  # Facturas y Notas
                 logger.info("Procesando COMUNICACIÓN DE BAJA (Facturas/Notas)")
                 return self._process_voided_documents(reason_code, description)
@@ -594,6 +598,9 @@ class CancellationService:
 
                                 self.operation.billing_status = 'CANCELLED'
                                 self.operation.save()
+                                # Anular pagos asociados para que no sumen en totales ni movimiento de caja
+                                from operations.utils import cancel_payments_for_operation
+                                cancel_payments_for_operation(self.operation)
 
                                 logger.info("Documento anulado exitosamente en SUNAT")
                                 return True

@@ -6,7 +6,7 @@ import graphene
 from django.db.models import Sum
 
 from finances.models import Payment
-from finances.mutations import CreatePayment, UpdatePayment, DeletePayment
+from finances.mutations import CreatePayment, UpdatePayment, DeletePayment, CancelPayment
 from finances.types import PaymentType, PaymentMonthlyReportType
 import pytz
 from django.utils import timezone
@@ -66,12 +66,11 @@ class FinancesQuery(graphene.ObjectType):
             print(f"End date (Perú): {end_date}")
             print(f"End date (UTC): {end_date.astimezone(pytz.UTC)}")
 
-            # 3. Consulta con rango seguro
+            # 3. Consulta: mostrar todos los pagos (incl. anulados); totales usan is_enabled en otro query
             payments = Payment.objects.filter(
                 company_id=company_id,
                 payment_date__gte=start_date,
-                payment_date__lt=end_date,
-                is_enabled=True
+                payment_date__lt=end_date
             ).select_related('user', 'company', 'operation').order_by('-payment_date')
 
             # ✅ CORREGIDO: Convertir fechas de pagos a zona horaria de Perú para mostrar
@@ -93,7 +92,8 @@ class FinancesQuery(graphene.ObjectType):
     @staticmethod
     def resolve_payment(self, info, id):
         try:
-            payment = Payment.objects.get(pk=id, is_enabled=True)
+            # Permitir consultar también pagos anulados (para mostrarlos en lista)
+            payment = Payment.objects.get(pk=id)
             # ✅ CORREGIDO: Convertir fecha a zona horaria de Perú
             payment.payment_date = payment.payment_date.astimezone(peru_tz)
             return payment
@@ -111,12 +111,12 @@ class FinancesQuery(graphene.ObjectType):
             )
             end_date = start_date + timedelta(days=1)
 
+            # Solo pagos activos (is_enabled=True); los anulados no suman en totales
             base_query = Payment.objects.filter(
                 company_id=company_id,
-                payment_date__gte=start_date,  # ✅ CORREGIDO: Usar rango en lugar de __date
-                payment_date__lt=end_date,  # ✅ CORREGIDO: Usar rango en lugar de __date
-                is_enabled=True,
-                status='C'  # Solo pagos cancelados
+                payment_date__gte=start_date,
+                payment_date__lt=end_date,
+                is_enabled=True
             )
 
             if summary_type == 'income':
@@ -267,9 +267,11 @@ class FinancesQuery(graphene.ObjectType):
         )
         start_datetime = datetime.combine(start_date, time.min)  # 00:00:00
         end_datetime = datetime.combine(end_date, time.max)  # 23:59:59.999999
+        # Pagos activos para totales; anulados (is_enabled=False) no se contabilizan
         payments = Payment.objects.filter(
             company_id=company_id,
-            payment_date__range=[start_datetime, end_datetime]
+            payment_date__range=[start_datetime, end_datetime],
+            is_enabled=True
         )
 
         # SEPARAR OPERACIONES POR TIPO
@@ -460,3 +462,4 @@ class FinancesMutation(graphene.ObjectType):
     create_payment = CreatePayment.Field()
     update_payment = UpdatePayment.Field()
     delete_payment = DeletePayment.Field()
+    cancel_payment = CancelPayment.Field()
