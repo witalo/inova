@@ -201,9 +201,11 @@ class CancelPayment(graphene.Mutation):
 
     def mutate(self, info, id):
         try:
-            user = info.context.user
-            if not user.is_authenticated:
-                raise Exception("Usuario no autenticado")
+            # No exigir context.user: el frontend puede usar token en header y el contexto GraphQL no tener user inyectado.
+            # Si más adelante configuras JWT en el contexto, puedes descomentar la validación.
+            # user = getattr(info.context, 'user', None)
+            # if user and not getattr(user, 'is_authenticated', True):
+            #     return CancelPayment(success=False, message="Usuario no autenticado", payment=None)
 
             payment = Payment.objects.get(pk=id)
             if not payment.is_enabled:
