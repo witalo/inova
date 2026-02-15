@@ -116,6 +116,8 @@ class CreateOperation(graphene.Mutation):
         global_discount_percent = graphene.Float(default_value=0)
         global_discount = graphene.Float(default_value=0)
         total_discount = graphene.Float(default_value=0)
+        display_discount = graphene.Float()  # opcional: lo que ve el cliente (ej. descuento sobre total)
+        display_discount_percent = graphene.Float()  # opcional: % a mostrar cuando aplicó descuento por %
         igv_percent = graphene.Float(default_value=18)
         igv_amount = graphene.Float(required=True)
         total_taxable = graphene.Float(default_value=0)
@@ -184,6 +186,8 @@ class CreateOperation(graphene.Mutation):
                 global_discount_percent=kwargs['global_discount_percent'],
                 global_discount=kwargs['global_discount'],
                 total_discount=kwargs['total_discount'],
+                display_discount=Decimal(str(kwargs['display_discount'])) if kwargs.get('display_discount') is not None else None,
+                display_discount_percent=Decimal(str(kwargs['display_discount_percent'])) if kwargs.get('display_discount_percent') is not None else None,
                 igv_percent=kwargs['igv_percent'],
                 igv_amount=kwargs['igv_amount'],
                 total_taxable=kwargs['total_taxable'],

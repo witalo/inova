@@ -45,6 +45,8 @@ class OperationType(DjangoObjectType):
     details = graphene.List(lambda: OperationDetailType)
     # Campos obligatorios con valores por defecto
     total_discount = graphene.Float(required=True)
+    display_discount = graphene.Float()  # opcional: descuento a mostrar al cliente (sobre total)
+    display_discount_percent = graphene.Float()  # opcional: % a mostrar cuando aplicó por %
     igv_percent = graphene.Float(required=True)
     igv_amount = graphene.Float(required=True)
     total_taxable = graphene.Float(required=True)

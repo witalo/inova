@@ -90,6 +90,14 @@ class Operation(models.Model):
     global_discount_percent = models.DecimalField('PORCENTAJE DESCUENTO GLOBAL', max_digits=15, decimal_places=6,
                                                   default=0)
     total_discount = models.DecimalField('TOTAL DESCUENTO', max_digits=15, decimal_places=6, default=0)
+    # Descuento a mostrar al cliente (ej. si aplicó "18 sobre total"); si es null se muestra total_discount
+    display_discount = models.DecimalField(
+        'DESCUENTO A MOSTRAR', max_digits=15, decimal_places=6, null=True, blank=True
+    )
+    # Porcentaje a mostrar cuando el usuario aplicó descuento por % (sobre total); si es null fue por monto
+    display_discount_percent = models.DecimalField(
+        'PORCENTAJE DESCUENTO A MOSTRAR', max_digits=15, decimal_places=6, null=True, blank=True
+    )
 
     igv_percent = models.DecimalField('PORCENTAJE IGV', max_digits=15, decimal_places=6, default=18)
     igv_amount = models.DecimalField('TOTAL IGV', max_digits=15, decimal_places=6, default=0)
