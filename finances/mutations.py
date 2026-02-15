@@ -212,6 +212,13 @@ class CancelPayment(graphene.Mutation):
                     message="El pago ya está anulado",
                     payment=payment
                 )
+            # No se puede anular desde aquí un pago de venta (boleta, factura, nota). Esos se anulan al anular la operación.
+            if payment.operation_id is not None:
+                return CancelPayment(
+                    success=False,
+                    message="Este pago pertenece a una venta. Anule la venta desde Ventas para anular el pago.",
+                    payment=payment
+                )
 
             payment.status = 'C'  # CANCELADO
             payment.is_enabled = False
